@@ -1,10 +1,48 @@
 import os
 import hashlib
+import psycopg2
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 
-# Use Supabase PostgreSQL connection string for dataset
-SUPABASE_DB_URL = "postgresql://postgres:[YOUR-PASSWORD]@db.mujedabghagsnioesygg.supabase.co:5432/postgres"
+# Load environment variables from .env
+load_dotenv()
+
+# Fetch variables for database connection
+DB_USER = os.getenv("user")
+DB_PASSWORD = os.getenv("password")
+DB_HOST = os.getenv("host")
+DB_PORT = os.getenv("port")
+DB_NAME = os.getenv("dbname")
+
+# Connect to the database using psycopg2 to verify connectivity
+try:
+    connection = psycopg2.connect(
+        user=DB_USER,
+        password=DB_PASSWORD,
+        host=DB_HOST,
+        port=DB_PORT,
+        dbname=DB_NAME
+    )
+    print("Connection successful!")
+    
+    # Create a cursor to execute SQL queries
+    cursor = connection.cursor()
+    
+    # Example query
+    cursor.execute("SELECT NOW();")
+    result = cursor.fetchone()
+    print("Current Time:", result)
+
+    # Close the cursor and connection
+    cursor.close()
+    connection.close()
+    print("Connection closed.")
+except Exception as e:
+    print(f"Failed to connect: {e}")
+
+# Build the SQLAlchemy Database URI from environment variables
+SQLALCHEMY_DATABASE_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Set base directory and template directory for cloud deployability
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -13,7 +51,7 @@ LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
 app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')
-app.config['SQLALCHEMY_DATABASE_URI'] = SUPABASE_DB_URL
+app.config['SQLALCHEMY_DATABASE_URI'] = SQLALCHEMY_DATABASE_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
