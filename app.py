@@ -1,159 +1,236 @@
-import os
-import hashlib
-import pandas as pd
-from flask import Flask, render_template, request, redirect, url_for, flash
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Page</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #6b73ff, #000dff);
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-image: url('{{ url_for("static", filename="desktop.png") }}');
+            background-size: cover;
+            background-position: center;
+        }
+        @media (max-width: 768px) {
+            body {
+                background-image: url('{{ url_for("static", filename="mobile.png") }}');
+            }
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+            max-width: 400px;
+            width: 100%;
+            padding: 40px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px); /* Safari support */
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 2em;
+            margin-bottom: 20px;
+            color: #f1f1f1;
+        }
+        .input-group {
+            margin: 20px 0;
+            position: relative;
+        }
+        input {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1em;
+            color: #333;
+        }
+        input:focus {
+            outline: none;
+            box-shadow: 0 0 5px #6b73ff;
+        }
+        .btn {
+            width: 100%;
+            background: linear-gradient(90deg, #6b73ff, #000dff);
+            color: #fff;
+            border: none;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 1.1em;
+            cursor: pointer;
+            margin: 15px 0;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background: linear-gradient(90deg, #5a63db, #000bbf);
+        }
+        .btn-google {
+            background: #fff;
+            color: #333;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+        }
+        .btn-google img {
+            width: 20px;
+            height: auto;
+            margin-right: 10px;
+        }
+        .btn-google:hover {
+            background: #f1f1f1;
+        }
+        .link {
+            font-size: 0.9em;
+            color: #a8c0ff;
+            text-decoration: none;
+        }
+        .link:hover {
+            text-decoration: underline;
+        }
+        .notification {
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            display: none;
+        }
+        .notification.error {
+            background-color: #ff4d4d;
+            color: white;
+        }
+        .notification.success {
+            background-color: #28a745;
+            color: white;
+        }
+        /* New styling to position flash messages in the top-right corner */
+        #flash-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: auto;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="flash-message" class="notification"></div>
 
-# Set base directory and template directory for cloud deployability
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')  # corrected directory name for templates
-# CSV file is in the root folder
-CSV_FILE_PATH = os.path.join(BASE_DIR, 'data.csv')
-LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
+    <div class="container" id="login-container">
+        <h1>Welcome Back!</h1>
+        <form action="{{ url_for('login') }}" method="post">
+            <div class="input-group">
+                <input type="email" id="email" name="email" placeholder="Email" required>
+            </div>
+            <div class="input-group">
+                <input type="password" id="password" name="password" placeholder="Password" required>
+            </div>
+            <button class="btn" id="login-btn">Login</button>
+        </form>
+        <p>or</p>
+        <button class="btn btn-google" id="google-login-btn">
+            <img src="{{ url_for('static', filename='Google-Symbol.png') }}" alt="Google" />
+            Continue with Google
+        </button>
+        <p>Don't have an account? <a class="link" href="#" id="sign-up-link">Sign up</a></p>
+    </div>
 
-app = Flask(__name__, template_folder=TEMPLATE_DIR)
-app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')  # Use an environment variable if available
+    <div class="container" id="signup-container" style="display: none;">
+        <h1>Create Account</h1>
+        <form action="{{ url_for('signup') }}" method="post">
+            <div class="input-group">
+                <input type="text" id="first-name" name="first_n" placeholder="First Name" required>
+            </div>
+            <div class="input-group">
+                <input type="text" id="last-name" name="last_n" placeholder="Last Name" required>
+            </div>
+            <div class="input-group">
+                <input type="text" id="username" name="username" placeholder="Username" required>
+            </div>
+            <div class="input-group">
+                <input type="password" id="signup-password" name="password" placeholder="Password" required>
+            </div>
+            <div class="input-group">
+                <input type="email" id="signup-email" name="email" placeholder="Email" required>
+            </div>
+            <button class="btn" id="signup-btn">Sign Up</button>
+        </form>
+    </div>
 
-def hash_data(data):
-    # Hashes the given string using SHA256 and returns the hex digest.
-    return hashlib.sha256(data.encode()).hexdigest()
+    <script>
+        // Toggle between login and signup containers
+        document.getElementById('sign-up-link').addEventListener('click', function(event) {
+            event.preventDefault();
+            document.getElementById('login-container').style.display = 'none';
+            document.getElementById('signup-container').style.display = 'block';
+        });
 
-# Ensure the CSV file exists and check for column names
-if not os.path.exists(CSV_FILE_PATH):
-    pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
-else:
-    try:
-        userinfo = pd.read_csv(CSV_FILE_PATH)
-        if set(userinfo.columns) != {'first_n', 'last_n', 'username', 'email', 'password'}:
-            userinfo.to_csv(CSV_FILE_PATH, index=False, header=['first_n', 'last_n', 'username', 'email', 'password'])
-    except pd.errors.EmptyDataError:
-        pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
+        document.getElementById('google-login-btn').addEventListener('click', function() {
+            // Redirect to Google login page
+            window.location.href = 'https://accounts.google.com/signin';
+        });
 
-def hash_networking(data):
-    # Converts the given string (e.g., file path) into its SHA256 hash representation.
-    return hashlib.sha256(data.encode()).hexdigest()
+        function validateEmail(email) {
+            const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return re.test(email);
+        }
 
-# Check if necessary template files are accessible, excluding data.csv which is in the root folder
-def check_files_accessible():
-    files_to_check = [LOGIN_HTML_PATH]
-    inaccessible_files = [file for file in files_to_check if not os.path.exists(file)]
-    if inaccessible_files:
-        flash("The following files are not accessible: " + ", ".join(inaccessible_files))
-        return False
-    else:
-        hashed_files = [hash_networking(f) for f in files_to_check]
-        flash("All necessary files are accessible. (Verified via hash: " + ", ".join(hashed_files) + ")")
-    return True
+        function validatePassword(password) {
+            return password.length >= 6; // Basic validation
+        }
 
-# Removed the home() route because the project no longer uses a home.html file.
-# Instead, the root URL now redirects to the login route.
-@app.route('/')
-def root():
-    return redirect(url_for('login'))
+        // Disable all keys except for input, textarea, and button elements
+        document.addEventListener('keydown', function(event) {
+            const activeElement = document.activeElement;
+            if (activeElement.tagName !== 'INPUT' && activeElement.tagName !== 'TEXTAREA' && activeElement.tagName !== 'BUTTON') {
+                event.preventDefault();
+            }
+        });
 
-@app.route('/update', methods=['POST'])
-def update():
-    first_n = request.form.get('first_n', '')
-    last_n = request.form.get('last_n', '')
-    username = request.form.get('username', '')
-    email = request.form.get('email', '')
-    password = request.form.get('password', '')
-    
-    if not all([first_n, last_n, username, email, password]):
-        flash('All fields are required.')
-        return redirect(url_for('login'))
-    
-    # Hash the password and email for storage
-    hashed_password = hash_data(password)
-    hashed_email = hash_data(email)
-    userinfo = pd.read_csv(CSV_FILE_PATH)
-    
-    if username in userinfo['username'].values:
-        userinfo.loc[userinfo['username'] == username, ['first_n', 'last_n', 'email', 'password']] = [
-            first_n, last_n, hashed_email, hashed_password
-        ]
-        flash('User information updated successfully.')
-    else:
-        new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
-                                 columns=['first_n', 'last_n', 'username', 'email', 'password'])
-        userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
-        flash('New user added successfully.')
-    
-    try:
-        userinfo.to_csv(CSV_FILE_PATH, index=False)
-    except PermissionError:
-        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
-        return "Error: Unable to update user information due to file permission issues.", 500
-    
-    return redirect(url_for('login'))
+        // Disable right click
+        document.addEventListener('contextmenu', function(event) {
+            event.preventDefault();
+        });
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if not check_files_accessible():
-        return "Error: Some files are not accessible. Please check the server logs for more details.", 500
-    
-    if request.method == 'POST':
-        email = request.form.get('email', '')
-        password = request.form.get('password', '')
-        
-        if not all([email, password]):
-            flash('Email and password are required.')
-            return redirect(url_for('login', status='error'))
-        
-        userinfo = pd.read_csv(CSV_FILE_PATH)
-        hashed_email = hash_data(email)
-        hashed_password = hash_data(password)
-        
-        found = False
-        for _, row in userinfo.iterrows():
-            if row['email'] == hashed_email and row['password'] == hashed_password:
-                found = True
-                break
-        
-        if found:
-            flash('Login successful.')
-            # Redirect back to the login page with a success status so that the client-side script can handle redirection.
-            return redirect(url_for('login', status='login_success'))
-        else:
-            flash('Invalid email or password.')
-            return redirect(url_for('login', status='error'))
-    
-    return render_template('login.html')
+        // Disable F1 to F12 keys
+        document.addEventListener('keydown', function(event) {
+            if (event.key >= 'F1' && event.key <= 'F12') {
+                event.preventDefault();
+            }
+        });
 
-# Add an additional route to support the login form action from the HTML template
-app.add_url_rule('/templates/login', endpoint='templates/login', view_func=login, methods=['GET', 'POST'])
+        // Function to get query parameter value
+        function getQueryParam(param) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(param);
+        }
 
-@app.route('/signup', methods=['POST'])
-def signup():
-    first_n = request.form.get('first_n', '')
-    last_n = request.form.get('last_n', '')
-    username = request.form.get('username', '')
-    email = request.form.get('email', '')
-    password = request.form.get('password', '')
-    
-    if not all([first_n, last_n, username, email, password]):
-        flash('All fields are required.')
-        return redirect(url_for('login'))
-    
-    # Hash password and email for storage
-    hashed_password = hash_data(password)
-    hashed_email = hash_data(email)
-    userinfo = pd.read_csv(CSV_FILE_PATH)
-    
-    if username in userinfo['username'].values:
-        flash('Username already exists.')
-        return redirect(url_for('login'))
-    
-    new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
-                             columns=['first_n', 'last_n', 'username', 'email', 'password'])
-    userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
-    
-    try:
-        userinfo.to_csv(CSV_FILE_PATH, index=False)
-        return redirect(url_for('login', status='signup_success'))
-    except PermissionError:
-        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
-        return "Error: Unable to save user information due to file permission issues.", 500
+        // Handle flash messages and redirection after successful login
+        document.addEventListener("DOMContentLoaded", function(){
+            var status = getQueryParam("status");
+            var flashEl = document.getElementById("flash-message");
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+            if(status === "login_success") {
+                // On successful login, immediately redirect using a relative URL suitable for cloud deployments.
+                window.location.href = "{{ url_for('index') }}";
+            } else if(status === "signup_success") {
+                flashEl.innerText = "Signup successful.";
+                flashEl.classList.add("success");
+                flashEl.style.display = "block";
+            } else if(status === "error") {
+                flashEl.innerText = "Error: Something went wrong.";
+                flashEl.classList.add("error");
+                flashEl.style.display = "block";
+            }
+        });
+    </script>
+</body>
+</html>
