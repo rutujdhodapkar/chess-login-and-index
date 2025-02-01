@@ -5,7 +5,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 
 # Set base directory and template directory for cloud deployability
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-TEMPLATE_DIR = os.path.join(BASE_DIR, 'tampelate')
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')  # corrected directory name for templates
+# CSV file is in the root folder
 CSV_FILE_PATH = os.path.join(BASE_DIR, 'data.csv')
 LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
 
@@ -27,7 +28,11 @@ else:
     except pd.errors.EmptyDataError:
         pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
 
-# Check if necessary template files are accessible, excluding data.csv which is not in the templates directory
+def hash_networking(data):
+    # Converts the given string (e.g., file path) into its SHA256 hash representation.
+    return hashlib.sha256(data.encode()).hexdigest()
+
+# Check if necessary template files are accessible, excluding data.csv which is in the root folder
 def check_files_accessible():
     files_to_check = [LOGIN_HTML_PATH]
     inaccessible_files = [file for file in files_to_check if not os.path.exists(file)]
@@ -39,15 +44,11 @@ def check_files_accessible():
         flash("All necessary files are accessible. (Verified via hash: " + ", ".join(hashed_files) + ")")
     return True
 
-def hash_networking(data):
-    # Converts the given string (e.g., file path) into its SHA256 hash representation.
-    return hashlib.sha256(data.encode()).hexdigest()
-
+# Removed the home() route because the project no longer uses a home.html file.
+# Instead, the root URL now redirects to the login route.
 @app.route('/')
-def home():
-    if not check_files_accessible():
-        return "Error: Some files are not accessible. Please check the server logs for more details.", 500
-    return render_template('login.html')
+def root():
+    return redirect(url_for('login'))
 
 @app.route('/update', methods=['POST'])
 def update():
@@ -59,7 +60,7 @@ def update():
     
     if not all([first_n, last_n, username, email, password]):
         flash('All fields are required.')
-        return redirect(url_for('home'))
+        return redirect(url_for('login'))
     
     # Hash the password and email for storage
     hashed_password = hash_data(password)
@@ -83,7 +84,7 @@ def update():
         print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
         return "Error: Unable to update user information due to file permission issues.", 500
     
-    return redirect(url_for('home'))
+    return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -110,12 +111,16 @@ def login():
         
         if found:
             flash('Login successful.')
-            return render_template('index.html')
+            # Redirect back to the login page with a success status so that the client-side script can handle redirection.
+            return redirect(url_for('login', status='login_success'))
         else:
             flash('Invalid email or password.')
             return redirect(url_for('login', status='error'))
     
     return render_template('login.html')
+
+# Add an additional route to support the login form action from the HTML template
+app.add_url_rule('/templates/login', endpoint='templates/login', view_func=login, methods=['GET', 'POST'])
 
 @app.route('/signup', methods=['POST'])
 def signup():
@@ -127,7 +132,7 @@ def signup():
     
     if not all([first_n, last_n, username, email, password]):
         flash('All fields are required.')
-        return redirect(url_for('home'))
+        return redirect(url_for('login'))
     
     # Hash password and email for storage
     hashed_password = hash_data(password)
@@ -136,7 +141,7 @@ def signup():
     
     if username in userinfo['username'].values:
         flash('Username already exists.')
-        return redirect(url_for('home'))
+        return redirect(url_for('login'))
     
     new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
                              columns=['first_n', 'last_n', 'username', 'email', 'password'])
@@ -144,7 +149,7 @@ def signup():
     
     try:
         userinfo.to_csv(CSV_FILE_PATH, index=False)
-        return redirect(url_for('home', status='signup_success'))
+        return redirect(url_for('login', status='signup_success'))
     except PermissionError:
         print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
         return "Error: Unable to save user information due to file permission issues.", 500
