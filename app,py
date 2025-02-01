@@ -5,7 +5,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 
 # Set base directory and template directory for cloud deployability
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'tampelate')
 CSV_FILE_PATH = os.path.join(BASE_DIR, 'data.csv')
 LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
 
