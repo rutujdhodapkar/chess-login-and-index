@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HOME</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;700&family=Roboto+Slab:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        /* Global Styling */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #121212;
+            background-size: cover;
+            color: #e0e0e0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(20px);
+            border-radius: 0px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            position: relative;
+            backdrop-filter: blur(20px);
+            border-radius: 35px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .user-profile, .actions, .network, .settings {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .user-profile i, .network i, .settings i, .actions i {
+            font-size: 2rem;
+            color: #95d207;
+            cursor: pointer;
+            height: auto; /* Correcting icon height */
+        }
+
+        /* Red dot for notifications */
+        .red-dot {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: red;
+        }
+
+        /* Main Section */
+        main {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        main h1 {
+            font-size: 4rem;
+            color: #FFD700;
+            margin-bottom: 50px;
+            background: linear-gradient(135deg, #ffffff, #fffffe);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            border-radius: 35px;
+        }
+
+        .options {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 30px;
+            width: 80%;
+        }
+
+        .options button {
+            padding: 20px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(20px);
+            border-radius: 35px;
+            background: linear-gradient(135deg, #4CAF50, #8BC34A); /* Different color for all buttons */
+        }
+
+        /* Dropdown and Modals */
+        .dropdown {
+            position: absolute;
+            top: 70px;
+            display: none;
+            flex-direction: column;
+            background: rgba(51, 51, 51, 0.8);
+            padding: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(20px);
+            border-radius: 35px;
+        }
+
+        .dropdown button {
+            background: none;
+            color: #00FF00;
+            border: none;
+            padding: 10px 15px;
+            font-size: 1rem;
+            text-align: left;
+            cursor: pointer;
+            border-radius: 35px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90%;
+            max-width: 400px;
+            background: rgba(51, 51, 51, 0.8);
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+            z-index: 100;
+            backdrop-filter: blur(20px);
+            border-radius: 35px;
+        }
+
+        .modal h2 {
+            margin-bottom: 20px;
+            font-size: 1.8rem;
+            text-align: center;
+            color: #00FF00;
+        }
+
+        .modal ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .modal ul li {
+            margin: 10px 0;
+            font-size: 1.2rem;
+            color: #00FF00;
+        }
+
+        .modal .close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 1.5rem;
+            color: #fff;
+            cursor: pointer;
+        }
+
+        /* Icon Positioning */
+        .message-icon, .settings-icon {
+            position: absolute;
+            font-size: 2rem;
+            cursor: pointer;
+            height: auto; /* Correcting icon height */
+        }
+
+        .message-icon {
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #eeff00;
+        }
+
+        .settings-icon {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            font-size: 2rem;
+            cursor: pointer;
+            color: #ffffff;
+        }
+
+        .wifi-icon {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            font-size: 1.5rem; /* Reduced font size to make the icon smaller */
+            color: #00FF00;
+            height: auto; /* Correcting icon height */
+        }
+
+        .wifi-icon.slow {
+            color: red;
+        }
+
+        .wifi-icon.good {
+            color: green;
+        }
+
+        .ping-text {
+            position: absolute;
+            bottom: 10px;
+            left: 50px;
+            font-size: 1rem;
+            color: #00FF00;
+            font-weight: bold;
+        }
+
+        /* Stylish Settings Options */
+        .modal ul li button {
+            width: 100%;
+            padding: 10px;
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #fff;
+            background: linear-gradient(135deg, #ecec6a, #f95252);
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            border-radius: 35px;
+        }
+
+        /* Stylish and Aesthetic profile Icon */
+        .user-profile i {
+            font-size: 2.5rem;
+            color: #a227d6;
+            cursor: pointer;
+            height: auto; /* Correcting icon height */
+        }
+          /*add friend*/
+        .user-profile .fa-user-plus {
+            font-size: 1.5rem;
+            cursor: pointer;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: hsl(155, 100%, 50%);
+            height: auto; /* Correcting icon height */
+        }
+
+        /* Stylish and Aesthetic Profile Modal */
+        .profile-modal ul li {
+            margin: 10px 0;
+            font-size: 1.2rem;
+            color: rgb(255, 136, 0);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .profile-modal ul li span {
+            font-weight: bold;
+            color: #FF4500;
+        }
+
+        /* Red color for logout button */
+        .modal ul li button.logout {
+            background: linear-gradient(135deg, #FF0000, #FF4500);
+            border-radius: 35px;
+        }
+
+        /* Stylish and Aesthetic Message Icon */
+        .message-icon i {
+            font-size: 2.5rem;
+            color: #c8ff00;
+            cursor: pointer;
+            height: auto; /* Correcting icon height */
+        }
+
+        /* User ID Tooltip */
+        .user-profile .tooltip {
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: #00FF00;
+            padding: 5px 10px;
+            border-radius: 10px;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        /* Stylish and Aesthetic Friend Profile */
+        #friendProfile span {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #FFD700;
+        }
+
+        /* Stylish and Aesthetic Friend Info */
+        #friendProfile ul li span {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #00C9FF;
+        }
+
+        /* Stylish background for searched friend */
+        #friendProfile {
+            background: rgba(255, 255, 255, 0.8);
+            padding: 20px;
+            border-radius: 35px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Light background for search friend ID input */
+        #friendIdInput {
+            background: rgba(255, 255, 255, 0.8);
+            color: #000;
+        }
+
+        /* Copyright Styling */
+        .copyright {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.8rem;
+        }
+
+        /* Responsive Design for Mobile */
+        @media (max-width: 768px) {
+            header {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .user-profile {
+                order: 2; /* Move user profile to the bottom */
+                align-self: flex-end; /* Align to the right */
+            }
+
+            .message-icon {
+                order: 1; /* Move message icon to the top */
+            }
+
+            .options {
+                grid-template-columns: 1fr;
+                gap: 20px;
+                width: 100%;
+            }
+
+            main h1 {
+                font-size: 2.5rem;
+                margin-bottom: 30px;
+            }
+
+            .options button {
+                padding: 15px;
+                font-size: 1.2rem;
+            }
+
+            .modal {
+                width: 90%;
+                padding: 15px;
+            }
+
+            .modal h2 {
+                font-size: 1.5rem;
+            }
+
+            .modal ul li {
+                font-size: 1rem;
+            }
+
+            .modal ul li button {
+                font-size: 1rem;
+                padding: 8px;
+            }
+
+            .user-profile i, .network i, .settings i, .actions i {
+                font-size: 1.5rem;
+            }
+
+            .message-icon, .settings-icon {
+                font-size: 1.5rem;
+            }
+
+            .wifi-icon {
+                font-size: 1.2rem;
+            }
+
+            .ping-text {
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <div class="user-profile">
+                <i class="fas fa-user-circle" onclick="toggleProfileModal()" style="position: absolute; top: 10px; right: 50px;"></i> <!-- Profile Icon -->
+                <i class="fas fa-user-plus" onclick="toggleAddFriendModal()" style="font-size: 1.5rem; cursor: pointer;"></i> <!-- Add Friend Icon -->
+            </div>
+            <div class="message-icon">
+                <i class="fas fa-envelope" onclick="toggleMessageModal()" id="messageIcon"></i> <!-- Message Icon -->
+            </div>
+        </header>
+
+        <!-- Main Section -->
+        <main>
+            <h1>CHESS GAME</h1>
+            <div class="options">
+                <button onclick="playWithComputer()">Play with Computer</button>
+                <button onclick="playWithFriends()">Play with Friends</button>
+                <button onclick="playUsingRecommendation()">Play Using Recommendation</button>
+                <button onclick="playOnline()">Online</button>
+            </div>
+        </main>
+
+        <!-- Profile Modal -->
+        <div class="modal profile-modal" id="profileModal">
+            <i class="fas fa-times close-btn" onclick="toggleProfileModal()"></i>
+            <h2>Player Profile</h2>
+            <ul>
+                <li>Player ID: <span>CH123456</span></li>
+                <li>Games Played: <span>250</span></li>
+                <li>Games Won: <span>150</span></li>
+                <li>Games Lost: <span>100</span></li>
+                <li>Your Rating: <span>1750</span></li>
+            </ul>
+        </div>
+
+        <!-- Add Friend Modal -->
+        <div class="modal" id="addFriendModal">
+            <i class="fas fa-times close-btn" onclick="toggleAddFriendModal()"></i>
+            <h2>Add Friend</h2>
+            <input type="text" id="friendIdInput" placeholder="Enter Friend ID" style="width: 100%; padding: 10px; margin-bottom: 10px; border-radius: 5px; border: none;">
+            <button onclick="searchId()">Search ID</button>
+            <button onclick="inviteFriend()">Invite Friend</button>
+            <div id="friendProfile" style="display: none; margin-top: 20px;">
+                <h2>Friend Profile</h2>
+                <ul>
+                    <li>Friend ID: <span id="friendId"></span></li>
+                    <li>Games Played: <span id="friendGamesPlayed"></span></li>
+                    <li>Games Won: <span id="friendGamesWon"></span></li>
+                    <li>Games Lost: <span id="friendGamesLost"></span></li>
+                    <li>Friend Rating: <span id="friendRating"></span></li>
+                </ul>
+                <i class="fas fa-user-plus" id="addFriendIcon" style="font-size: 1.5rem; cursor: pointer; color: #00FF00;"></i> <!-- Add Friend Icon -->
+                <div id="requestSentMessage" style="display: none; color: green; margin-top: 10px;">
+                    Friend request sent!
+                </div>
+            </div>
+            <div id="friendNotFound" style="display: none; color: red; margin-top: 20px;">
+                Friend ID doesn't exist.
+            </div>
+        </div>
+
+        <!-- Message Modal -->
+        <div class="modal" id="messageModal">
+            <i class="fas fa-times close-btn" onclick="toggleMessageModal()"></i>
+            <h2>Messages</h2>
+            <ul>
+                <li>No Messages</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Wi-Fi Icon (Network Speed) -->
+    <div class="wifi-icon" id="wifiIcon">
+        <i class="fas fa-wifi"></i> <!-- Wi-Fi Icon -->
+    </div>
+
+    <!-- Ping Text -->
+    <div class="ping-text" id="pingText">Ping: 50ms</div>
+
+    <!-- Settings Icon -->
+    <div class="settings-icon">
+        <i class="fas fa-cog" onclick="toggleSettingsModal()" id="settingsIcon1"></i>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <i class="fas fa-times close-btn" onclick="toggleSettingsModal()"></i>
+        <h2>Settings</h2>
+        <ul>
+            <li><button onclick="adjustVolume()">Sound</button></li>
+            <li id="volumeControl" style="display: none; color: #00FF00; text-align: center;">
+                Volume: 50%
+                <div>
+                    <button onclick="increaseVolume()">+</button>
+                    <button onclick="decreaseVolume()">-</button>
+                </div>
+            </li>
+            <li><button onclick="help()">Help</button></li>
+            <li><button onclick="toggleLicenceModal()">Licence</button></li>
+            <li><button onclick="togglePrivacyModal()">Privacy</button></li>
+            <li><button class="logout" onclick="logout()">Logout</button></li>
+        </ul>
+    </div>
+
+    <!-- Help Modal Part 1 -->
+    <div class="modal" id="helpModalPart1" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="toggleHelpModalPart1()"></i>
+        <h2>How to Play Chess</h2>
+        <p>Chess is a two-player strategy board game played on a checkered board with 64 squares arranged in an 8×8 grid. The game is played by millions of people worldwide.</p>
+        <h3>Basic Rules:</h3>
+        <ul>
+            <li>Each player begins with 16 pieces: one king, one queen, two rooks, two knights, two bishops, and eight pawns.</li>
+            <li>The objective is to checkmate the opponent's king by placing it under an inescapable threat of capture.</li>
+            <li>To this end, a player's pieces are used to attack and capture the opponent's pieces, while supporting each other.</li>
+            <li>During the game, play typically involves making exchanges of one piece for an opponent's similar piece, but also finding and engineering opportunities to get the better of the opponent.</li>
+        </ul>
+        <button onclick="toggleHelpModalPart2()">Next</button>
+    </div>
+
+    <!-- Help Modal Part 2 -->
+    <div class="modal" id="helpModalPart2" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="toggleHelpModalPart2()"></i>
+        <h2>Chess Pieces and Their Moves</h2>
+        <ul>
+            <li><strong>King:</strong> Moves one square in any direction.</li>
+            <li><strong>Queen:</strong> Moves any number of vacant squares in any direction.</li>
+            <li><strong>Rook:</strong> Moves any number of vacant squares forwards, backwards, left, or right in a straight line.</li>
+            <li><strong>Bishop:</strong> Moves any number of vacant squares diagonally.</li>
+            <li><strong>Knight:</strong> Moves to the nearest square not on the same rank, file, or diagonal. (In an "L" shape: two squares in a horizontal or vertical direction, then move one square horizontally or vertically.)</li>
+            <li><strong>Pawn:</strong> Moves forward exactly one square, or optionally, two squares when on its starting square, but captures diagonally.</li>
+        </ul>
+        <button onclick="toggleHelpModalPart3()">Next</button>
+    </div>
+
+    <!-- Help Modal Part 3 -->
+    <div class="modal" id="helpModalPart3" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="toggleHelpModalPart3()"></i>
+        <h2>Chess Pieces and Their Moves</h2>
+        <h3>Images:</h3>
+        <img src="https://example.com/chess-board.png" alt="Chess Board" style="width: 100%; margin-top: 10px;">
+        <img src="https://example.com/chess-pieces.png" alt="Chess Pieces" style="width: 100%; margin-top: 10px;">
+    </div>
+
+    <!-- Licence Modal Part 1 -->
+    <div class="modal" id="licenceModalPart1" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="toggleLicenceModalPart1()"></i>
+        <h2>MIT License</h2>
+        <p>Copyright (c) [2025] [RUTUJ DHODAPKAR, VISHAL PATIL, ANURAG VAISHNAV, OM SHELKE]</p>
+        <h3>Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:</h3>
+        <button onclick="toggleLicenceModalPart2()">Next</button>
+    </div>
+
+    <!-- Licence Modal Part 2 -->
+    <div class="modal" id="licenceModalPart2" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="toggleLicenceModalPart2()"></i>
+        <h2>MIT License</h2>
+        <h3>The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.</h3>
+        <button onclick="toggleLicenceModalPart3()">Next</button>
+    </div>
+
+    <!-- Licence Modal Part 3 -->
+    <div class="modal" id="licenceModalPart3" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="toggleLicenceModalPart3()"></i>
+        <h2>MIT License</h3>
+        <h3>THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</h3>
+    </div>
+
+    <!-- Privacy Modal Part 1 -->
+    <div class="modal" id="privacyModalPart1" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart1()"></i>
+        <h2>Privacy Policy</h2>
+        <p>Effective Date: 2025</p>
+        <p>We respect your privacy and are committed to protecting your personal information. This Privacy Policy explains how we collect, use, and safeguard your data when you visit our chess webpage ("Website") or use our services.</p>
+        <button onclick="togglePrivacyModalPart2()">Next</button>
+    </div>
+
+    <!-- Privacy Modal Part 2 -->
+    <div class="modal" id="privacyModalPart2" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart2()"></i>
+        <h2>Privacy Policy</h2>
+        <p>We collect information to provide and improve our services, including personal information such as your name, email address, and account details (e.g., username and password), as well as non-personal information like browser type, device information, IP address, cookies, and usage data.</p>
+        <button onclick="togglePrivacyModalPart3()">Next</button>
+    </div>
+
+    <!-- Privacy Modal Part 3 -->
+    <div class="modal" id="privacyModalPart3" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart3()"></i>
+        <h2>Privacy Policy</h2>
+        <p>Additionally, we collect user activity data such as chess games played, ratings, statistics, progress, and messages or communications on the platform.</p>
+        <button onclick="togglePrivacyModalPart4()">Next</button>
+    </div>
+
+    <!-- Privacy Modal Part 4 -->
+    <div class="modal" id="privacyModalPart4" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart4()"></i>
+        <h2>Privacy Policy</h2>
+        <p>We use this information to provide and maintain our services, personalize your experience, analyze and improve the Website’s functionality, communicate with you through updates, newsletters, or responses to inquiries, and prevent fraud or ensure security.</p>
+        <button onclick="togglePrivacyModalPart5()">Next</button>
+    </div>
+
+    <!-- Privacy Modal Part 5 -->
+    <div class="modal" id="privacyModalPart5" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart5()"></i>
+        <h2>Privacy Policy</h2>
+        <p>While we do not sell or rent your personal information, we may share it with service providers assisting in operating the Website (e.g., hosting, analytics), comply with legal obligations, or protect our rights, privacy, safety, or property.</p>
+        <button onclick="togglePrivacyModalPart6()">Next</button>
+    </div>
+
+    <!-- Privacy Modal Part 6 -->
+    <div class="modal" id="privacyModalPart6" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart6()"></i>
+        <h2>Privacy Policy</h2>
+        <p>Cookies and similar tracking technologies are used to enhance your experience on our Website. You can manage or disable cookies via your browser settings, though this may impact functionality. Our Website may contain links to third-party sites, whose privacy practices we are not responsible for; please review their policies before sharing any personal information.</p>
+        <button onclick="togglePrivacyModalPart7()">Next</button>
+    </div>
+
+    <!-- Privacy Modal Part 7 -->
+    <div class="modal" id="privacyModalPart7" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart7()"></i>
+        <h2>Privacy Policy</h2>
+        <p>To protect your data, we implement appropriate technical and organizational measures against unauthorized access, alteration, disclosure, or destruction. Depending on your location, you may have rights to access, correct, update, delete, restrict processing, or transfer your personal data. To exercise these rights, contact us at chessgame@gmail.com.</p>
+        <button onclick="togglePrivacyModalPart8()">Next</button>
+    </div>
+
+    <!-- Privacy Modal Part 8 -->
+    <div class="modal" id="privacyModalPart8" style="overflow-x: auto;">
+        <i class="fas fa-times close-btn" onclick="togglePrivacyModalPart8()"></i>
+        <h2>Privacy Policy</h2>
+        <p>Our Website is not intended for children under 5, and we do not knowingly collect information from them. If we discover such data has been collected, we will promptly delete it.</p>
+        <p>We may update this Privacy Policy periodically, with changes posted on this page alongside an updated effective date. We encourage you to review this Policy regularly.</p>
+        <p>For questions or concerns about this Privacy Policy, please contact us at [Your Website Name], [Your Contact Address], or email us at [Insert Contact Email]. By using our Website, you consent to the terms of this Privacy Policy.</p>
+    </div>
+
+    <script>
+        let hasNewMessage = false; // Set to true if there are new messages
+        let hasNewFriendRequest = false; // Set to true if there are new friend requests
+        let volume = 50; // Initial volume
+
+        function toggleProfileModal() {
+            const modal = document.getElementById("profileModal");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleAddFriendModal() {
+            const modal = document.getElementById("addFriendModal");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleMessageModal() {
+            const modal = document.getElementById("messageModal");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleSettingsModal() {
+            const modal = document.getElementById("settingsModal");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleHelpModalPart1() {
+            const modal = document.getElementById("helpModalPart1");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleHelpModalPart2() {
+            const modal = document.getElementById("helpModalPart2");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleHelpModalPart3() {
+            const modal = document.getElementById("helpModalPart3");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleLicenceModal() {
+            toggleLicenceModalPart1();
+        }
+
+        function toggleLicenceModalPart1() {
+            const modal = document.getElementById("licenceModalPart1");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleLicenceModalPart2() {
+            const modal = document.getElementById("licenceModalPart2");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function toggleLicenceModalPart3() {
+            const modal = document.getElementById("licenceModalPart3");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModal() {
+            togglePrivacyModalPart1();
+        }
+
+        function togglePrivacyModalPart1() {
+            const modal = document.getElementById("privacyModalPart1");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModalPart2() {
+            const modal = document.getElementById("privacyModalPart2");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModalPart3() {
+            const modal = document.getElementById("privacyModalPart3");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModalPart4() {
+            const modal = document.getElementById("privacyModalPart4");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModalPart5() {
+            const modal = document.getElementById("privacyModalPart5");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModalPart6() {
+            const modal = document.getElementById("privacyModalPart6");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModalPart7() {
+            const modal = document.getElementById("privacyModalPart7");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function togglePrivacyModalPart8() {
+            const modal = document.getElementById("privacyModalPart8");
+            modal.style.display = modal.style.display === "block" ? "none" : "block";
+        }
+
+        function adjustVolume() {
+            const volumeControl = document.getElementById("volumeControl");
+            volumeControl.style.display = volumeControl.style.display === "block" ? "none" : "block";
+        }
+
+        function increaseVolume() {
+            if (volume < 100) {
+                volume += 10;
+                document.getElementById("volumeControl").innerText = `Volume: ${volume}%`;
+            }
+        }
+
+        function decreaseVolume() {
+            if (volume > 0) {
+                volume -= 10;
+                document.getElementById("volumeControl").innerText = `Volume: ${volume}%`;
+            }
+        }
+
+        function help() {
+            toggleHelpModalPart1();
+        }
+
+        function privacy() {
+            togglePrivacyModal();
+        }
+
+        function logout() {
+            confirm("ARE YOU SURE!");
+            localStorage.removeItem('logoutMessage'); // Delete the message when user logs out
+            window.location.href = "C:\\Users\\visha\\OneDrive\\Desktop\\New folder\\template\\login.html"; // Redirect to login page
+        }
+
+        // Show red dots when there are new messages or friend requests
+        const messageIcon = document.getElementById("messageIcon");
+
+        function updateNotificationIcons() {
+            // Clear all red dots first
+            messageIcon.querySelector('.red-dot')?.remove();
+
+            // Add red dot if there are new messages
+            if (hasNewMessage) {
+                const redDot = document.createElement("div");
+                redDot.classList.add("red-dot");
+                messageIcon.appendChild(redDot);
+            }
+
+            // Add red dot if there are new friend requests
+            if (hasNewFriendRequest) {
+                const redDot = document.createElement("div");
+                redDot.classList.add("red-dot");
+                messageIcon.appendChild(redDot);
+            }
+        }
+
+        // Call this function whenever there's a new message or friend request
+        updateNotificationIcons();
+
+        // Simulating dynamic ping update
+        function updatePing() {
+            const pingText = document.getElementById("pingText");
+            const wifiIcon = document.getElementById("wifiIcon");
+            const randomPing = Math.floor(Math.random() * 100) + 20; // Simulate random ping between 20ms to 120ms
+            pingText.innerText = `Ping: ${randomPing}ms`;
+
+            // Update Wi-Fi icon color based on ping
+            if (randomPing > 80) {
+                wifiIcon.classList.add("slow");
+                wifiIcon.classList.remove("good");
+                pingText.style.color = "red"; // Change ping text color to red
+            } else {
+                wifiIcon.classList.add("good");
+                wifiIcon.classList.remove("slow");
+                pingText.style.color = "green"; // Change ping text color to green
+            }
+        }
+
+        setInterval(updatePing, 2000); // Update every 2 seconds
+
+        // Function to search friend ID and display friend profile
+        function searchId() {
+            const friendIdInput = document.getElementById("friendIdInput").value;
+            if (friendIdInput) {
+                // Simulate fetching friend profile data
+                const friendProfile = {
+                    id: friendIdInput,
+                    gamesPlayed: 100,
+                    gamesWon: 60,
+                    gamesLost: 40,
+                    rating: 1600
+                };
+
+                // Check if friend ID exists
+                if (friendProfile.id === "nonexistent") {
+                    document.getElementById("friendProfile").style.display = "none";
+                    document.getElementById("friendNotFound").style.display = "block";
+                } else {
+                    // Display friend profile
+                    document.getElementById("friendId").innerText = friendProfile.id;
+                    document.getElementById("friendGamesPlayed").innerText = friendProfile.gamesPlayed;
+                    document.getElementById("friendGamesWon").innerText = friendProfile.gamesWon;
+                    document.getElementById("friendGamesLost").innerText = friendProfile.gamesLost;
+                    document.getElementById("friendRating").innerText = friendProfile.rating;
+                    document.getElementById("friendProfile").style.display = "block";
+                    document.getElementById("friendNotFound").style.display = "none";
+
+                    // Show add friend icon and request sent message
+                    const addFriendIcon = document.getElementById("addFriendIcon");
+                    addFriendIcon.style.display = "block";
+                    addFriendIcon.onclick = function() {
+                        document.getElementById("requestSentMessage").style.display = "block";
+                    };
+                }
+            } else {
+                alert("Please enter a Friend ID.");
+            }
+        }
+
+        // Add sound effect when user clicks on any option
+        const clickSound = new Audio('click-sound.mp3'); // Make sure to have a 'click-sound.mp3' file in your project
+
+        document.querySelectorAll('button').forEach(button => {
+            button.addEventListener('click', () => {
+                clickSound.play();
+            });
+        });
+
+        document.querySelectorAll('.user-profile i, .message-icon i, .settings-icon i').forEach(icon => {
+            icon.addEventListener('click', () => {
+                clickSound.play();
+            });
+        });
+
+        // Function to handle "Play Online" button click
+        function playOnline() {
+            window.location.href = "index.html"; // Redirect to index.html
+        }
+    </script>
+</body>
+</html>
+</html>
