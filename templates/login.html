@@ -126,7 +126,7 @@
 
     <div class="container" id="login-container">
         <h1>Welcome Back!</h1>
-        <form action="{{ url_for('templates/login') }}" method="post">
+        <form action="{{ url_for('login') }}" method="post">
             <div class="input-group">
                 <input type="email" id="email" name="email" placeholder="Email" required>
             </div>
@@ -137,7 +137,7 @@
         </form>
         <p>or</p>
         <button class="btn btn-google" id="google-login-btn">
-            <img src="{{ url_for('static', filename='templates/Google-Symbol.png') }}" alt="Google" />
+            <img src="{{ url_for('static', filename='Google-Symbol.png') }}" alt="Google" />
             Continue with Google
         </button>
         <p>Don't have an account? <a class="link" href="#" id="sign-up-link">Sign up</a></p>
@@ -220,7 +220,7 @@
 
             if(status === "login_success") {
                 // On successful login, immediately redirect using a relative URL suitable for cloud deployments.
-                window.location.href = "{{ url_for('templates/index') }}";
+                window.location.href = "{{ url_for('index') }}";
             } else if(status === "signup_success") {
                 flashEl.innerText = "Signup successful.";
                 flashEl.classList.add("success");
