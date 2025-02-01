@@ -1,47 +1,50 @@
 import os
 import hashlib
-import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+
+# Use Supabase PostgreSQL connection string for dataset
+SUPABASE_DB_URL = "postgresql://postgres:[YOUR-PASSWORD]@db.mujedabghagsnioesygg.supabase.co:5432/postgres"
 
 # Set base directory and template directory for cloud deployability
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')  # corrected directory name for templates
-# CSV file is in the root folder
-CSV_FILE_PATH = os.path.join(BASE_DIR, 'data.csv')
 LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
-app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')  # Use an environment variable if available
+app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')
+app.config['SQLALCHEMY_DATABASE_URI'] = SUPABASE_DB_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# Define the User model corresponding to the users table in the database
+class User(db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    first_n = db.Column(db.String(100), nullable=False)
+    last_n = db.Column(db.String(100), nullable=False)
+    username = db.Column(db.String(100), unique=True, nullable=False)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password = db.Column(db.String(256), nullable=False)
+
+    def __init__(self, first_n, last_n, username, email, password):
+        self.first_n = first_n
+        self.last_n = last_n
+        self.username = username
+        self.email = email
+        self.password = password
 
 def hash_data(data):
     # Hashes the given string using SHA256 and returns the hex digest.
     return hashlib.sha256(data.encode()).hexdigest()
 
-# Ensure the CSV file exists and check for column names
-if not os.path.exists(CSV_FILE_PATH):
-    pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
-else:
-    try:
-        userinfo = pd.read_csv(CSV_FILE_PATH)
-        if set(userinfo.columns) != {'first_n', 'last_n', 'username', 'email', 'password'}:
-            userinfo.to_csv(CSV_FILE_PATH, index=False, header=['first_n', 'last_n', 'username', 'email', 'password'])
-    except pd.errors.EmptyDataError:
-        pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
-
-def hash_networking(data):
-    # Converts the given string (e.g., file path) into its SHA256 hash representation.
-    return hashlib.sha256(data.encode()).hexdigest()
-
-# Check if necessary template files are accessible, excluding data.csv which is in the root folder
 def check_files_accessible():
-    files_to_check = [LOGIN_HTML_PATH]
-    inaccessible_files = [file for file in files_to_check if not os.path.exists(file)]
-    if inaccessible_files:
-        flash("The following files are not accessible: " + ", ".join(inaccessible_files))
+    # Check if necessary template files are accessible (ignoring the database as it is handled via SQLAlchemy)
+    if not os.path.exists(LOGIN_HTML_PATH):
+        flash("The following file is not accessible: " + LOGIN_HTML_PATH)
         return False
-    else:
-        hashed_files = [hash_networking(f) for f in files_to_check]
-        flash("All necessary files are accessible. (Verified via hash: " + ", ".join(hashed_files) + ")")
+    flash("All necessary files are accessible. (Verified: " + LOGIN_HTML_PATH + ")")
     return True
 
 # Removed the home() route because the project no longer uses a home.html file.
@@ -65,24 +68,25 @@ def update():
     # Hash the password and email for storage
     hashed_password = hash_data(password)
     hashed_email = hash_data(email)
-    userinfo = pd.read_csv(CSV_FILE_PATH)
+    user = User.query.filter_by(username=username).first()
     
-    if username in userinfo['username'].values:
-        userinfo.loc[userinfo['username'] == username, ['first_n', 'last_n', 'email', 'password']] = [
-            first_n, last_n, hashed_email, hashed_password
-        ]
+    if user:
+        user.first_n = first_n
+        user.last_n = last_n
+        user.email = hashed_email
+        user.password = hashed_password
         flash('User information updated successfully.')
     else:
-        new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
-                                 columns=['first_n', 'last_n', 'username', 'email', 'password'])
-        userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
+        user = User(first_n, last_n, username, hashed_email, hashed_password)
+        db.session.add(user)
         flash('New user added successfully.')
     
     try:
-        userinfo.to_csv(CSV_FILE_PATH, index=False)
-    except PermissionError:
-        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
-        return "Error: Unable to update user information due to file permission issues.", 500
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error: {str(e)}")
+        return "Error: Unable to update user information due to database issues.", 500
     
     return redirect(url_for('login'))
 
@@ -99,17 +103,11 @@ def login():
             flash('Email and password are required.')
             return redirect(url_for('login', status='error'))
         
-        userinfo = pd.read_csv(CSV_FILE_PATH)
         hashed_email = hash_data(email)
         hashed_password = hash_data(password)
+        user = User.query.filter_by(email=hashed_email, password=hashed_password).first()
         
-        found = False
-        for _, row in userinfo.iterrows():
-            if row['email'] == hashed_email and row['password'] == hashed_password:
-                found = True
-                break
-        
-        if found:
+        if user:
             flash('Login successful.')
             # After successful login, render the index page.
             return render_template('index.html')
@@ -134,24 +132,25 @@ def signup():
     # Hash password and email for storage
     hashed_password = hash_data(password)
     hashed_email = hash_data(email)
-    userinfo = pd.read_csv(CSV_FILE_PATH)
     
-    if username in userinfo['username'].values:
+    if User.query.filter_by(username=username).first():
         flash('Username already exists.')
         return redirect(url_for('login'))
     
-    new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
-                             columns=['first_n', 'last_n', 'username', 'email', 'password'])
-    userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
+    new_user = User(first_n, last_n, username, hashed_email, hashed_password)
+    db.session.add(new_user)
     
     try:
-        userinfo.to_csv(CSV_FILE_PATH, index=False)
+        db.session.commit()
         return redirect(url_for('login', status='signup_success'))
-    except PermissionError:
-        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
-        return "Error: Unable to save user information due to file permission issues.", 500
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error: {str(e)}")
+        return "Error: Unable to save user information due to database issues.", 500
 
 if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()  # Create tables if they don't exist
     port = int(os.environ.get('PORT', 5000))
     # Disable debug mode for cloud deployments unless explicitly set
     debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
