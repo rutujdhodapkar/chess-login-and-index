@@ -1,0 +1,154 @@
+import os
+import hashlib
+import pandas as pd
+from flask import Flask, render_template, request, redirect, url_for, flash
+
+# Set base directory and template directory for cloud deployability
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
+CSV_FILE_PATH = os.path.join(BASE_DIR, 'data.csv')
+LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
+
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
+app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')  # Use an environment variable if available
+
+def hash_data(data):
+    # Hashes the given string using SHA256 and returns the hex digest.
+    return hashlib.sha256(data.encode()).hexdigest()
+
+# Ensure the CSV file exists and check for column names
+if not os.path.exists(CSV_FILE_PATH):
+    pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
+else:
+    try:
+        userinfo = pd.read_csv(CSV_FILE_PATH)
+        if set(userinfo.columns) != {'first_n', 'last_n', 'username', 'email', 'password'}:
+            userinfo.to_csv(CSV_FILE_PATH, index=False, header=['first_n', 'last_n', 'username', 'email', 'password'])
+    except pd.errors.EmptyDataError:
+        pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
+
+# Check if all necessary files are accessible, converting file data to a hash for verification
+def check_files_accessible():
+    files_to_check = [LOGIN_HTML_PATH, CSV_FILE_PATH]
+    inaccessible_files = [file for file in files_to_check if not os.path.exists(file)]
+    if inaccessible_files:
+        flash("The following files are not accessible: " + ", ".join(inaccessible_files))
+        return False
+    else:
+        hashed_files = [hash_networking(f) for f in files_to_check]
+        flash("All necessary files are accessible. (Verified via hash: " + ", ".join(hashed_files) + ")")
+    return True
+
+def hash_networking(data):
+    # Converts the given string (e.g., file path) into its SHA256 hash representation.
+    return hashlib.sha256(data.encode()).hexdigest()
+
+@app.route('/')
+def home():
+    if not check_files_accessible():
+        return "Error: Some files are not accessible. Please check the server logs for more details.", 500
+    return render_template('login.html')
+
+@app.route('/update', methods=['POST'])
+def update():
+    first_n = request.form.get('first_n', '')
+    last_n = request.form.get('last_n', '')
+    username = request.form.get('username', '')
+    email = request.form.get('email', '')
+    password = request.form.get('password', '')
+    
+    if not all([first_n, last_n, username, email, password]):
+        flash('All fields are required.')
+        return redirect(url_for('home'))
+    
+    # Hash the password and email for storage
+    hashed_password = hash_data(password)
+    hashed_email = hash_data(email)
+    userinfo = pd.read_csv(CSV_FILE_PATH)
+    
+    if username in userinfo['username'].values:
+        userinfo.loc[userinfo['username'] == username, ['first_n', 'last_n', 'email', 'password']] = [
+            first_n, last_n, hashed_email, hashed_password
+        ]
+        flash('User information updated successfully.')
+    else:
+        new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
+                                 columns=['first_n', 'last_n', 'username', 'email', 'password'])
+        userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
+        flash('New user added successfully.')
+    
+    try:
+        userinfo.to_csv(CSV_FILE_PATH, index=False)
+    except PermissionError:
+        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
+        return "Error: Unable to update user information due to file permission issues.", 500
+    
+    return redirect(url_for('home'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if not check_files_accessible():
+        return "Error: Some files are not accessible. Please check the server logs for more details.", 500
+    
+    if request.method == 'POST':
+        email = request.form.get('email', '')
+        password = request.form.get('password', '')
+        
+        if not all([email, password]):
+            flash('Email and password are required.')
+            return redirect(url_for('login', status='error'))
+        
+        userinfo = pd.read_csv(CSV_FILE_PATH)
+        hashed_email = hash_data(email)
+        hashed_password = hash_data(password)
+        
+        found = False
+        for _, row in userinfo.iterrows():
+            if row['email'] == hashed_email and row['password'] == hashed_password:
+                found = True
+                break
+        
+        if found:
+            flash('Login successful.')
+            return render_template('index.html')
+        else:
+            flash('Invalid email or password.')
+            return redirect(url_for('login', status='error'))
+    
+    return render_template('login.html')
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    first_n = request.form.get('first_n', '')
+    last_n = request.form.get('last_n', '')
+    username = request.form.get('username', '')
+    email = request.form.get('email', '')
+    password = request.form.get('password', '')
+    
+    if not all([first_n, last_n, username, email, password]):
+        flash('All fields are required.')
+        return redirect(url_for('home'))
+    
+    # Hash password and email for storage
+    hashed_password = hash_data(password)
+    hashed_email = hash_data(email)
+    userinfo = pd.read_csv(CSV_FILE_PATH)
+    
+    if username in userinfo['username'].values:
+        flash('Username already exists.')
+        return redirect(url_for('home'))
+    
+    new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
+                             columns=['first_n', 'last_n', 'username', 'email', 'password'])
+    userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
+    
+    try:
+        userinfo.to_csv(CSV_FILE_PATH, index=False)
+        return redirect(url_for('home', status='signup_success'))
+    except PermissionError:
+        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
+        return "Error: Unable to save user information due to file permission issues.", 500
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
