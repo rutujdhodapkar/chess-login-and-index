@@ -15,13 +15,13 @@
             justify-content: center;
             align-items: center;
             height: 100vh;
-            background-image: url('{{ url_for("static", filename="desktop.png") }}');
+            background-image: url('/static/desktop.png');
             background-size: cover;
             background-position: center;
         }
         @media (max-width: 768px) {
             body {
-                background-image: url('{{ url_for("static", filename="mobile.png") }}');
+                background-image: url('/static/mobile.png');
             }
         }
         .container {
@@ -126,7 +126,7 @@
 
     <div class="container" id="login-container">
         <h1>Welcome Back!</h1>
-        <form action="{{ url_for('login') }}" method="post">
+        <form action="/login" method="post">
             <div class="input-group">
                 <input type="email" id="email" name="email" placeholder="Email" required>
             </div>
@@ -137,7 +137,7 @@
         </form>
         <p>or</p>
         <button class="btn btn-google" id="google-login-btn">
-            <img src="{{ url_for('static', filename='Google-Symbol.png') }}" alt="Google" />
+            <img src="/static/Google-Symbol.png" alt="Google" />
             Continue with Google
         </button>
         <p>Don't have an account? <a class="link" href="#" id="sign-up-link">Sign up</a></p>
@@ -145,7 +145,7 @@
 
     <div class="container" id="signup-container" style="display: none;">
         <h1>Create Account</h1>
-        <form action="{{ url_for('signup') }}" method="post">
+        <form action="/signup" method="post">
             <div class="input-group">
                 <input type="text" id="first-name" name="first_n" placeholder="First Name" required>
             </div>
@@ -220,7 +220,7 @@
 
             if(status === "login_success") {
                 // On successful login, immediately redirect using a relative URL suitable for cloud deployments.
-                window.location.href = "{{ url_for('index') }}";
+                window.location.href = "/";
             } else if(status === "signup_success") {
                 flashEl.innerText = "Signup successful.";
                 flashEl.classList.add("success");
