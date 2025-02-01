@@ -1,119 +1,159 @@
 import os
 import hashlib
 import pandas as pd
-import streamlit as st
+from flask import Flask, render_template, request, redirect, url_for, flash
 
-# Set base directory and file paths
+# Set base directory and template directory for cloud deployability
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')  # corrected directory name for templates
+# CSV file is in the root folder
 CSV_FILE_PATH = os.path.join(BASE_DIR, 'data.csv')
+LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
+
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
+app.secret_key = os.environ.get('SECRET_KEY', 'your_secret_key_here')  # Use an environment variable if available
 
 def hash_data(data):
     # Hashes the given string using SHA256 and returns the hex digest.
     return hashlib.sha256(data.encode()).hexdigest()
 
-def initialize_csv():
-    # Ensure the CSV file exists with the proper columns
-    if not os.path.exists(CSV_FILE_PATH):
+# Ensure the CSV file exists and check for column names
+if not os.path.exists(CSV_FILE_PATH):
+    pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
+else:
+    try:
+        userinfo = pd.read_csv(CSV_FILE_PATH)
+        if set(userinfo.columns) != {'first_n', 'last_n', 'username', 'email', 'password'}:
+            userinfo.to_csv(CSV_FILE_PATH, index=False, header=['first_n', 'last_n', 'username', 'email', 'password'])
+    except pd.errors.EmptyDataError:
         pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
+
+def hash_networking(data):
+    # Converts the given string (e.g., file path) into its SHA256 hash representation.
+    return hashlib.sha256(data.encode()).hexdigest()
+
+# Check if necessary template files are accessible, excluding data.csv which is in the root folder
+def check_files_accessible():
+    files_to_check = [LOGIN_HTML_PATH]
+    inaccessible_files = [file for file in files_to_check if not os.path.exists(file)]
+    if inaccessible_files:
+        flash("The following files are not accessible: " + ", ".join(inaccessible_files))
+        return False
     else:
-        try:
-            userinfo = pd.read_csv(CSV_FILE_PATH)
-            if set(userinfo.columns) != {'first_n', 'last_n', 'username', 'email', 'password'}:
-                userinfo.to_csv(CSV_FILE_PATH, index=False, header=['first_n', 'last_n', 'username', 'email', 'password'])
-        except pd.errors.EmptyDataError:
-            pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
+        hashed_files = [hash_networking(f) for f in files_to_check]
+        flash("All necessary files are accessible. (Verified via hash: " + ", ".join(hashed_files) + ")")
+    return True
 
-# Initialize CSV on startup
-initialize_csv()
+# Removed the home() route because the project no longer uses a home.html file.
+# Instead, the root URL now redirects to the login route.
+@app.route('/')
+def root():
+    return redirect(url_for('login'))
 
-def update_user(first_n, last_n, username, email, password):
+@app.route('/update', methods=['POST'])
+def update():
+    first_n = request.form.get('first_n', '')
+    last_n = request.form.get('last_n', '')
+    username = request.form.get('username', '')
+    email = request.form.get('email', '')
+    password = request.form.get('password', '')
+    
     if not all([first_n, last_n, username, email, password]):
-        st.error('All fields are required.')
-        return
+        flash('All fields are required.')
+        return redirect(url_for('login'))
+    
+    # Hash the password and email for storage
     hashed_password = hash_data(password)
     hashed_email = hash_data(email)
     userinfo = pd.read_csv(CSV_FILE_PATH)
+    
     if username in userinfo['username'].values:
         userinfo.loc[userinfo['username'] == username, ['first_n', 'last_n', 'email', 'password']] = [
             first_n, last_n, hashed_email, hashed_password
         ]
-        st.success('User information updated successfully.')
+        flash('User information updated successfully.')
     else:
         new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
                                  columns=['first_n', 'last_n', 'username', 'email', 'password'])
         userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
-        st.success('New user added successfully.')
+        flash('New user added successfully.')
+    
     try:
         userinfo.to_csv(CSV_FILE_PATH, index=False)
     except PermissionError:
-        st.error(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
+        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
+        return "Error: Unable to update user information due to file permission issues.", 500
+    
+    return redirect(url_for('login'))
 
-def login_user(email, password):
-    if not all([email, password]):
-        st.error('Email and password are required.')
-        return False
-    userinfo = pd.read_csv(CSV_FILE_PATH)
-    hashed_email = hash_data(email)
-    hashed_password = hash_data(password)
-    for _, row in userinfo.iterrows():
-        if row['email'] == hashed_email and row['password'] == hashed_password:
-            st.success('Login successful.')
-            return True
-    st.error('Invalid email or password.')
-    return False
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if not check_files_accessible():
+        return "Error: Some files are not accessible. Please check the server logs for more details.", 500
+    
+    if request.method == 'POST':
+        email = request.form.get('email', '')
+        password = request.form.get('password', '')
+        
+        if not all([email, password]):
+            flash('Email and password are required.')
+            return redirect(url_for('login', status='error'))
+        
+        userinfo = pd.read_csv(CSV_FILE_PATH)
+        hashed_email = hash_data(email)
+        hashed_password = hash_data(password)
+        
+        found = False
+        for _, row in userinfo.iterrows():
+            if row['email'] == hashed_email and row['password'] == hashed_password:
+                found = True
+                break
+        
+        if found:
+            flash('Login successful.')
+            # After successful login, open the file "index.html" from folder tampleta.
+            return render_template('index.html')
+        else:
+            flash('Invalid email or password.')
+            return redirect(url_for('login', status='error'))
+    
+    return render_template('login.html')
 
-def signup_user(first_n, last_n, username, email, password):
+# Add an additional route to support the login form action from the HTML template
+app.add_url_rule('/templates/login', endpoint='templates/login', view_func=login, methods=['GET', 'POST'])
+
+@app.route('/signup', methods=['POST'])
+def signup():
+    first_n = request.form.get('first_n', '')
+    last_n = request.form.get('last_n', '')
+    username = request.form.get('username', '')
+    email = request.form.get('email', '')
+    password = request.form.get('password', '')
+    
     if not all([first_n, last_n, username, email, password]):
-        st.error('All fields are required.')
-        return
+        flash('All fields are required.')
+        return redirect(url_for('login'))
+    
+    # Hash password and email for storage
     hashed_password = hash_data(password)
     hashed_email = hash_data(email)
     userinfo = pd.read_csv(CSV_FILE_PATH)
+    
     if username in userinfo['username'].values:
-        st.error('Username already exists.')
-    else:
-        new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
-                                 columns=['first_n', 'last_n', 'username', 'email', 'password'])
-        userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
-        try:
-            userinfo.to_csv(CSV_FILE_PATH, index=False)
-            st.success('Signup successful.')
-        except PermissionError:
-            st.error(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
+        flash('Username already exists.')
+        return redirect(url_for('login'))
+    
+    new_entry = pd.DataFrame([[first_n, last_n, username, hashed_email, hashed_password]],
+                             columns=['first_n', 'last_n', 'username', 'email', 'password'])
+    userinfo = pd.concat([userinfo, new_entry], ignore_index=True)
+    
+    try:
+        userinfo.to_csv(CSV_FILE_PATH, index=False)
+        return redirect(url_for('login', status='signup_success'))
+    except PermissionError:
+        print(f"Permission denied: Unable to write to {CSV_FILE_PATH}. Please check file permissions.")
+        return "Error: Unable to save user information due to file permission issues.", 500
 
-# Streamlit UI
-st.title("User Authentication App")
-menu = ["Login", "Signup", "Update"]
-choice = st.sidebar.selectbox("Menu", menu)
-
-if choice == "Login":
-    st.header("Login")
-    with st.form("login_form"):
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Login")
-    if submit:
-        if login_user(email, password):
-            st.write("Welcome!")
-elif choice == "Signup":
-    st.header("Signup")
-    with st.form("signup_form"):
-        first_n = st.text_input("First Name")
-        last_n = st.text_input("Last Name")
-        username = st.text_input("Username")
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Signup")
-    if submit:
-        signup_user(first_n, last_n, username, email, password)
-elif choice == "Update":
-    st.header("Update User Info")
-    with st.form("update_form"):
-        first_n = st.text_input("First Name")
-        last_n = st.text_input("Last Name")
-        username = st.text_input("Username")
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Update")
-    if submit:
-        update_user(first_n, last_n, username, email, password)
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
