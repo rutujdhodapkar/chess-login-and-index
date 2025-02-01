@@ -5,13 +5,9 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 
 # Set base directory and template directory for cloud deployability
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-# Create an instance directory for writable file storage on cloud deploy
-INSTANCE_DIR = os.path.join(BASE_DIR, 'instance')
-if not os.path.exists(INSTANCE_DIR):
-    os.makedirs(INSTANCE_DIR)
 TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')  # corrected directory name for templates
-# CSV file is now stored in the instance folder to ensure write permissions in cloud environments
-CSV_FILE_PATH = os.path.join(INSTANCE_DIR, 'data.csv')
+# CSV file is in the root folder
+CSV_FILE_PATH = os.path.join(BASE_DIR, 'data.csv')
 LOGIN_HTML_PATH = os.path.join(TEMPLATE_DIR, 'login.html')
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
@@ -36,7 +32,7 @@ def hash_networking(data):
     # Converts the given string (e.g., file path) into its SHA256 hash representation.
     return hashlib.sha256(data.encode()).hexdigest()
 
-# Check if necessary template files are accessible, excluding data.csv which is in the instance folder
+# Check if necessary template files are accessible, excluding data.csv which is in the root folder
 def check_files_accessible():
     files_to_check = [LOGIN_HTML_PATH]
     inaccessible_files = [file for file in files_to_check if not os.path.exists(file)]
