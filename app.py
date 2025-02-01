@@ -111,16 +111,13 @@ def login():
         
         if found:
             flash('Login successful.')
-            # After successful login, open the file "index.html" from folder tampleta.
+            # After successful login, render the index page.
             return render_template('index.html')
         else:
             flash('Invalid email or password.')
             return redirect(url_for('login', status='error'))
     
     return render_template('login.html')
-
-# Add an additional route to support the login form action from the HTML template
-app.add_url_rule('/templates/login', endpoint='templates/login', view_func=login, methods=['GET', 'POST'])
 
 @app.route('/signup', methods=['POST'])
 def signup():
@@ -156,4 +153,6 @@ def signup():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Disable debug mode for cloud deployments unless explicitly set
+    debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
+    app.run(host='0.0.0.0', port=port, debug=debug_mode)
