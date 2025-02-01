@@ -27,9 +27,9 @@ else:
     except pd.errors.EmptyDataError:
         pd.DataFrame(columns=['first_n', 'last_n', 'username', 'email', 'password']).to_csv(CSV_FILE_PATH, index=False)
 
-# Check if all necessary files are accessible, converting file data to a hash for verification
+# Check if necessary template files are accessible, excluding data.csv which is not in the templates directory
 def check_files_accessible():
-    files_to_check = [LOGIN_HTML_PATH, CSV_FILE_PATH]
+    files_to_check = [LOGIN_HTML_PATH]
     inaccessible_files = [file for file in files_to_check if not os.path.exists(file)]
     if inaccessible_files:
         flash("The following files are not accessible: " + ", ".join(inaccessible_files))
