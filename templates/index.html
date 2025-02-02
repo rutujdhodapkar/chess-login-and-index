@@ -3,32 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chess.com UI Clone</title>
+    <title>Chess AI</title>
     <style>
+        :root {
+            --primary-bg: rgba(20, 20, 30, 0.95);
+            --secondary-bg: rgba(40, 40, 60, 0.9);
+            --main-bg: rgba(60, 60, 80, 0.9);
+            --accent-color: #1abc9c;
+            --text-color: #ecf0f1;
+            --hover-bg: rgba(26, 188, 156, 0.2);
+            --blur-effect: blur(10px);
+        }
         body {
             margin: 0;
             font-family: 'Roboto', sans-serif;
-            background-color: #121212;
-            color: #e0e0e0;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            background: linear-gradient(135deg, #141e30, #243b55);
+            color: var(--text-color);
         }
         .container {
             display: flex;
             flex-direction: column;
             height: 100vh;
             overflow: hidden;
+            backdrop-filter: var(--blur-effect);
+            -webkit-backdrop-filter: var(--blur-effect); /* Safari support */
         }
         aside {
             width: 100%;
-            background-color: #1f1f1f;
-            color: #e0e0e0;
+            background: var(--secondary-bg);
+            border: 1px solid rgba(236, 240, 241, 0.1);
+            backdrop-filter: var(--blur-effect);
+            -webkit-backdrop-filter: var(--blur-effect); /* Safari support */
+            color: var(--text-color);
             padding: 20px;
             display: flex;
             flex-direction: column;
-            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.5);
-            border-radius: 10px;
+            border-radius: 12px;
             box-sizing: border-box;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            transition: background 0.3s ease, color 0.3s ease;
         }
         nav ul {
             list-style: none;
@@ -36,27 +48,30 @@
             margin: 0;
         }
         nav ul li a {
-            color: #e0e0e0;
+            color: var(--text-color);
             text-decoration: none;
             padding: 10px;
             display: block;
-            transition: background-color 0.3s ease, color 0.3s ease;
-            border-radius: 5px;
+            transition: background 0.3s ease, color 0.3s ease;
+            border-radius: 8px;
         }
         nav ul li a:hover {
-            background-color: #333;
-            color: #fff;
+            background: var(--hover-bg);
+            color: var(--accent-color);
         }
         .main-content {
             flex-grow: 1;
-            background-color: #2d2d2d;
-            color: #e0e0e0;
+            background: var(--main-bg);
+            border: 1px solid rgba(236, 240, 241, 0.1);
+            backdrop-filter: var(--blur-effect);
+            -webkit-backdrop-filter: var(--blur-effect); /* Safari support */
+            color: var(--text-color);
             display: flex;
             flex-direction: column;
-            border-radius: 10px;
+            border-radius: 12px;
             margin-top: 10px;
             box-sizing: border-box;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            transition: background 0.3s ease, color 0.3s ease;
         }
         .board-container {
             display: flex;
@@ -79,7 +94,7 @@
             grid-template-columns: repeat(8, 1fr);
             grid-template-rows: repeat(8, 1fr);
             gap: 2px;
-            border-radius: 10px;
+            border-radius: 12px;
             overflow: hidden;
             box-sizing: border-box;
             transition: transform 0.3s ease;
@@ -88,14 +103,14 @@
             width: 100%;
             padding-top: 100%;
             position: relative;
-            transition: background-color 0.3s ease, transform 0.3s ease;
+            transition: background 0.3s ease, transform 0.3s ease;
             box-sizing: border-box;
         }
         .dark {
-            background-color: #769656;
+            background: rgba(26, 188, 156, 0.6);
         }
         .light {
-            background-color: #eeeed2;
+            background: rgba(236, 240, 241, 0.7);
         }
         .piece {
             position: absolute;
@@ -109,17 +124,19 @@
         }
         .piece:hover {
             transform: translate(-50%, -50%) scale(1.1);
-            opacity: 0.8;
+            opacity: 0.85;
         }
         .right-sidebar {
             width: 100%;
-            background-color: #1f1f1f;
+            background: var(--secondary-bg);
+            border: 1px solid rgba(236, 240, 241, 0.1);
+            backdrop-filter: var(--blur-effect);
+            -webkit-backdrop-filter: var(--blur-effect); /* Safari support */
             padding: 20px;
-            box-shadow: -2px 0 5px rgba(0, 0, 0, 0.5);
-            border-radius: 10px;
+            border-radius: 12px;
             margin-top: 10px;
             box-sizing: border-box;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            transition: background 0.3s ease, color 0.3s ease;
         }
         .right-sidebar ul {
             list-style: none;
@@ -127,24 +144,26 @@
             margin: 0;
         }
         .right-sidebar ul li a {
-            color: #e0e0e0;
+            color: var(--text-color);
             text-decoration: none;
             padding: 10px 0;
             display: block;
-            transition: background-color 0.3s ease, color 0.3s ease;
-            border-radius: 5px;
+            transition: background 0.3s ease, color 0.3s ease;
+            border-radius: 8px;
         }
         .right-sidebar ul li a:hover {
-            background-color: #333;
-            color: #fff;
+            background: var(--hover-bg);
+            color: var(--accent-color);
         }
         .highlight {
-            background-color: rgba(255, 255, 0, 0.5);
-            transition: background-color 0.3s ease;
+            background: rgba(236, 240, 241, 0.2);
+            transition: background 0.3s ease;
+            backdrop-filter: var(--blur-effect);
+            -webkit-backdrop-filter: var(--blur-effect); /* Safari support */
         }
         .taken-moves {
             margin-top: 20px;
-            color: #e0e0e0;
+            color: var(--text-color);
         }
         .taken-moves img {
             width: 30px;
@@ -156,16 +175,16 @@
             transform: scale(1.2);
         }
         button {
-            background-color: #444;
-            color: #e0e0e0;
+            background: linear-gradient(145deg, #16a085, #1abc9c);
+            color: var(--text-color);
             border: none;
             padding: 10px;
             cursor: pointer;
-            transition: background-color 0.3s ease, transform 0.3s ease;
-            border-radius: 5px;
+            transition: background 0.3s ease, transform 0.3s ease;
+            border-radius: 8px;
         }
         button:hover {
-            background-color: #555;
+            background: linear-gradient(145deg, #1abc9c, #16a085);
             transform: scale(1.05);
         }
         .disabled {
@@ -179,33 +198,33 @@
             height: 100%;
         }
         .timer div {
-            background-color: #333;
+            background: rgba(0, 0, 0, 0.5);
             padding: 10px;
-            border-radius: 5px;
-            color: #e0e0e0;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            border-radius: 8px;
+            color: var(--text-color);
+            transition: background 0.3s ease, color 0.3s ease;
         }
         .white-timer {
             position: absolute;
             top: 50%;
             right: -150px;
             transform: translateY(-50%);
-            background-color: #333;
+            background: rgba(0, 0, 0, 0.5);
             padding: 10px;
-            border-radius: 5px;
-            color: #e0e0e0;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            border-radius: 8px;
+            color: var(--text-color);
+            transition: background 0.3s ease, color 0.3s ease;
         }
         .black-timer {
             position: absolute;
             bottom: 50%;
             right: -150px;
             transform: translateY(50%);
-            background-color: #333;
+            background: rgba(0, 0, 0, 0.5);
             padding: 10px;
-            border-radius: 5px;
-            color: #e0e0e0;
-            transition: background-color 0.3s ease, color 0.3s ease;
+            border-radius: 8px;
+            color: var(--text-color);
+            transition: background 0.3s ease, color 0.3s ease;
         }
         @media (min-width: 768px) {
             .container {
@@ -232,6 +251,8 @@
     </style>
 </head>
 <body>
+    <!-- New Header to display username from login.html -->
+    <div id="userHeader" style="text-align: center; padding: 10px; font-size: 1.2em; color: var(--text-color);"></div>
     <div class="container">
         <!-- Sidebar -->
         <aside>
@@ -255,7 +276,6 @@
                     <li><a href="#">Chess Variants</a></li>
                 </ul>
             </nav>
-
         </aside>
 
         <!-- Main Content -->
@@ -263,8 +283,7 @@
             <!-- Board and Sidebar -->
             <div class="board-container">
                 <!-- Element above the board -->
-                <div style="width: 90%; max-width: 600px; margin: 0 auto; text-align: center; padding: 10px; background-color: #1f1f1f; border-radius: 10px; box-sizing: border-box; height: 50px;">
-                    
+                <div style="width: 90%; max-width: 600px; margin: 0 auto; text-align: center; padding: 10px; background: var(--secondary-bg); border-radius: 12px; box-sizing: border-box; height: 50px;">
                     <div class="timer">
                         <div id="blackTimer">Black: 00:00</div>
                     </div>
@@ -347,15 +366,13 @@
                     </div>
                 </section>
                 <!-- New Element Below the Chess Board -->
-                <div style="width: 90%; max-width: 600px; margin: 10px auto; text-align: center; padding: 10px; background-color: #1f1f1f; border-radius: 10px; box-sizing: border-box; height: 50px;">
-
+                <div style="width: 90%; max-width: 600px; margin: 10px auto; text-align: center; padding: 10px; background: var(--secondary-bg); border-radius: 12px; box-sizing: border-box; height: 50px;">
                     <div class="timer">
                         <div id="whiteTimer">White: 00:00</div>
                     </div>
                 </div>
                 <!-- Right Sidebar -->
                 <aside class="right-sidebar">
-          
                     <button id="flipBoardButton" style="margin-top: 10px;">Flip Board</button>
                     <div class="taken-moves">
                         <h4>Taken Moves</h4>
@@ -363,7 +380,7 @@
                     </div>
                     <div style="margin-top: 20px; display: flex; flex-direction: column; align-items: center;">
                         <label for="timerSelect" style="font-weight: 600; margin-bottom: 10px; color: #ffffff;">Select Timer:</label>
-                        <select id="timerSelect" title="Select Timer" style="padding: 12px; border-radius: 8px; background-color: #3a3a3a; color: #ffffff; border: 1px solid #555; width: 100%; max-width: 300px;" onchange="toggleCustomTimer(this)">
+                        <select id="timerSelect" title="Select Timer" style="padding: 12px; border-radius: 8px; background: rgba(40,40,60,0.9); color: #ecf0f1; border: 1px solid rgba(236,240,241,0.2); width: 100%; max-width: 300px;" onchange="toggleCustomTimer(this)">
                             <option value="180">3 minutes</option>
                             <option value="300">5 minutes</option>
                             <option value="600">10 minutes</option>
@@ -373,16 +390,15 @@
                     </div>
                     <div id="customTimerSection" style="margin-top: 20px; display: none; flex-direction: column; align-items: center;">
                         <label for="customTimer" style="font-weight: 600; margin-bottom: 10px; color: #ffffff;">Custom Timer:</label>
-                        <input type="number" id="customTimerValue" placeholder="Enter value" style="padding: 12px; border-radius: 8px; background-color: #3a3a3a; color: #ffffff; border: 1px solid #555; width: 100%; max-width: 300px; margin-bottom: 10px;">
-                        <select id="customTimerUnit" title="Custom Timer Unit" style="padding: 12px; border-radius: 8px; background-color: #3a3a3a; color: #ffffff; border: 1px solid #555; width: 100%; max-width: 300px;">
+                        <input type="number" id="customTimerValue" placeholder="Enter value" style="padding: 12px; border-radius: 8px; background: rgba(58,58,58,0.8); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); width: 100%; max-width: 300px; margin-bottom: 10px;">
+                        <select id="customTimerUnit" title="Custom Timer Unit" style="padding: 12px; border-radius: 8px; background: rgba(58,58,58,0.8); color: #ffffff; border: 1px solid rgba(255,255,255,0.2); width: 100%; max-width: 300px;">
                             <option value="seconds">Seconds</option>
                             <option value="minutes">Minutes</option>
                         </select>
-                        <button id="setCustomTimerButton" style="margin-top: 10px; padding: 12px 20px; border-radius: 8px; background-color: #4caf50; color: #ffffff; border: none; cursor: pointer; transition: background-color 0.3s ease;">Set Custom Timer</button>
+                        <button id="setCustomTimerButton" style="margin-top: 10px; padding: 12px 20px; border-radius: 8px; background: #4caf50; color: #ffffff; border: none; cursor: pointer; transition: background 0.3s ease;">Set Custom Timer</button>
                     </div>
-                    <button id="startGameButton" style="margin-top: 10px; padding: 12px 20px; border-radius: 8px; background-color: #2196f3; color: #ffffff; border: none; cursor: pointer; transition: background-color 0.3s ease;">Start Game</button>
-                    <button id="resetGameButton" style="margin-top: 10px; padding: 12px 20px; border-radius: 8px; background-color: #f44336; color: #ffffff; border: none; cursor: pointer; display: none; transition: background-color 0.3s ease;">Reset Game</button>
-
+                    <button id="startGameButton" style="margin-top: 10px; padding: 12px 20px; border-radius: 8px; background: #2196f3; color: #ffffff; border: none; cursor: pointer; transition: background 0.3s ease;">Start Game</button>
+                    <button id="resetGameButton" style="margin-top: 10px; padding: 12px 20px; border-radius: 8px; background: #f44336; color: #ffffff; border: none; cursor: pointer; display: none; transition: background 0.3s ease;">Reset Game</button>
                     <script>
                         function toggleCustomTimer(selectElement) {
                             const customTimerSection = document.getElementById('customTimerSection');
@@ -401,7 +417,16 @@
             </div>
         </main>
     </div>
-
+    
+    <script>
+        document.addEventListener("DOMContentLoaded", function(){
+            const params = new URLSearchParams(window.location.search);
+            const username = params.get("username");
+            if (username) {
+                document.getElementById("userHeader").textContent = "Logged in as: " + username;
+            }
+        });
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
     <script>
         const chess = new Chess();
@@ -411,19 +436,19 @@
         let whiteTimerValue = 0;
         let blackTimerValue = 0;
         let currentPlayer = 'w';
-
+    
         pieces.forEach(piece => {
             piece.addEventListener('dragstart', dragStart);
             piece.addEventListener('click', selectPiece);
         });
-
+    
         const squares = document.querySelectorAll('.square');
         squares.forEach(square => {
             square.addEventListener('dragover', dragOver);
             square.addEventListener('drop', drop);
             square.addEventListener('click', clickToMove);
         });
-
+    
         function dragStart(e) {
             e.dataTransfer.setData('text/plain', e.target.id);
             setTimeout(() => {
@@ -431,11 +456,11 @@
             }, 0);
             showPossibleMoves(e.target);
         }
-
+    
         function dragOver(e) {
             e.preventDefault();
         }
-
+    
         function drop(e) {
             e.preventDefault();
             const id = e.dataTransfer.getData('text');
@@ -443,17 +468,17 @@
             const targetSquare = e.target.closest('.square');
             const from = piece.parentElement.getAttribute('data-square');
             const to = targetSquare.getAttribute('data-square');
-
-            // Check if it's a pawn promotion move
+    
+            // Check for pawn promotion
             const isPawnPromotion = (piece.id.includes('pawn') && 
                 ((piece.id.includes('white') && to[1] === '8') || 
                 (piece.id.includes('black') && to[1] === '1')));
-
+    
             if (isPawnPromotion) {
                 const promotionChoice = prompt('Promote to (q=queen, r=rook, b=bishop, n=knight):', 'q');
                 if (!promotionChoice) {
                     piece.classList.remove('hide');
-                    return; // Cancel the move if no promotion piece selected
+                    return;
                 }
                 const move = chess.move({ 
                     from, 
@@ -490,35 +515,35 @@
                 }
             }
         }
-
+    
         function selectPiece(e) {
             const piece = e.target;
             showPossibleMoves(piece);
             selectedPiece = piece;
         }
-
+    
         function showPossibleMoves(piece) {
             const square = piece.parentElement.getAttribute('data-square');
             const moves = chess.moves({ square, verbose: true });
-
+    
             clearHighlights();
             moves.forEach(move => {
                 const targetSquare = document.querySelector(`[data-square="${move.to}"]`);
                 targetSquare.classList.add('highlight');
             });
         }
-
+    
         function clearHighlights() {
             document.querySelectorAll('.highlight').forEach(square => {
                 square.classList.remove('highlight');
             });
         }
-
+    
         function updateBoard() {
             clearHighlights();
             selectedPiece = null;
         }
-
+    
         function addTakenMove(move) {
             const takenMovesList = document.getElementById('takenMovesList');
             const moveItem = document.createElement('li');
@@ -527,7 +552,7 @@
             moveItem.appendChild(pieceImage);
             takenMovesList.appendChild(moveItem);
         }
-
+    
         function checkGameStatus() {
             if (chess.in_checkmate()) {
                 alert('Checkmate! Game over.');
@@ -548,7 +573,7 @@
                 alert('Check!');
             }
         }
-
+    
         function promotePawn(piece, color, to, promotionPiece) {
             const pieceImage = document.createElement('img');
             let pieceCode;
@@ -566,7 +591,7 @@
                     pieceCode = color === 'w' ? '7/70' : 'e/ef';
                     break;
                 default:
-                    pieceCode = color === 'w' ? '1/15' : '4/47'; // Default to queen
+                    pieceCode = color === 'w' ? '1/15' : '4/47';
             }
             pieceImage.src = `https://upload.wikimedia.org/wikipedia/commons/${pieceCode}/Chess_${promotionPiece}${color === 'w' ? 'lt45' : 'dt45'}.svg`;
             pieceImage.classList.add('piece');
@@ -579,22 +604,22 @@
             targetSquare.appendChild(pieceImage);
             piece.remove();
         }
-
+    
         function clickToMove(e) {
             const targetSquare = e.target.closest('.square');
             if (selectedPiece && targetSquare) {
                 const from = selectedPiece.parentElement.getAttribute('data-square');
                 const to = targetSquare.getAttribute('data-square');
-
-                // Check if it's a pawn promotion move
+    
+                // Check for pawn promotion
                 const isPawnPromotion = (selectedPiece.id.includes('pawn') && 
                     ((selectedPiece.id.includes('white') && to[1] === '8') || 
                     (selectedPiece.id.includes('black') && to[1] === '1')));
-
+    
                 if (isPawnPromotion) {
                     const promotionChoice = prompt('Promote to (q=queen, r=rook, b=bishop, n=knight):', 'q');
                     if (!promotionChoice) {
-                        return; // Cancel the move if no promotion piece selected
+                        return;
                     }
                     const move = chess.move({ 
                         from, 
@@ -627,14 +652,14 @@
                 }
             }
         }
-
+    
         // Flip board functionality
         document.getElementById('flipBoardButton').addEventListener('click', () => {
             const board = document.getElementById('chessBoard');
             const squares = Array.from(board.children);
             squares.reverse().forEach(square => board.appendChild(square));
         });
-
+    
         // Start game functionality
         document.getElementById('startGameButton').addEventListener('click', () => {
             const chessBoard = document.getElementById('chessBoard');
@@ -643,7 +668,7 @@
             document.getElementById('resetGameButton').style.display = 'block';
             startTimer();
         });
-
+    
         // Reset game functionality
         document.getElementById('resetGameButton').addEventListener('click', () => {
             chess.reset();
@@ -658,7 +683,7 @@
             document.getElementById('chessBoard').classList.add('disabled');
             resetPiecesToDefaultPositions();
         });
-
+    
         function resetPiecesToDefaultPositions() {
             const defaultPositions = {
                 'a8': 'black-rook-1', 'b8': 'black-knight-1', 'c8': 'black-bishop-1', 'd8': 'black-queen', 'e8': 'black-king', 'f8': 'black-bishop-2', 'g8': 'black-knight-2', 'h8': 'black-rook-2',
@@ -666,7 +691,7 @@
                 'a2': 'white-pawn-1', 'b2': 'white-pawn-2', 'c2': 'white-pawn-3', 'd2': 'white-pawn-4', 'e2': 'white-pawn-5', 'f2': 'white-pawn-6', 'g2': 'white-pawn-7', 'h2': 'white-pawn-8',
                 'a1': 'white-rook-1', 'b1': 'white-knight-1', 'c1': 'white-bishop-1', 'd1': 'white-queen', 'e1': 'white-king', 'f1': 'white-bishop-2', 'g1': 'white-knight-2', 'h1': 'white-rook-2'
             };
-
+    
             const pieceImages = {
                 'black-rook-1': 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
                 'black-knight-1': 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
@@ -701,7 +726,7 @@
                 'white-knight-2': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
                 'white-rook-2': 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg'
             };
-
+    
             squares.forEach(square => {
                 const squareId = square.getAttribute('data-square');
                 square.innerHTML = '';
@@ -718,13 +743,13 @@
                 }
             });
         }
-
+    
         function startTimer() {
             const timerSelect = document.getElementById('timerSelect');
             const customTimerValue = document.getElementById('customTimerValue').value;
             const customTimerUnit = document.getElementById('customTimerUnit').value;
             let initialTime = parseInt(timerSelect.value);
-
+    
             if (customTimerValue) {
                 if (customTimerUnit === 'minutes') {
                     initialTime = parseInt(customTimerValue) * 60;
@@ -732,7 +757,7 @@
                     initialTime = parseInt(customTimerValue);
                 }
             }
-
+    
             whiteTimerValue = initialTime;
             blackTimerValue = initialTime;
             updateTimers();
@@ -755,35 +780,35 @@
                 updateTimers();
             }, 1000);
         }
-
+    
         function updateTimers() {
             document.getElementById('whiteTimer').textContent = `White: ${formatTime(whiteTimerValue)}`;
             document.getElementById('blackTimer').textContent = `Black: ${formatTime(blackTimerValue)}`;
         }
-
+    
         function formatTime(seconds) {
             const minutes = Math.floor(seconds / 60);
             const remainingSeconds = seconds % 60;
             return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
         }
-
+    
         function switchPlayer() {
             currentPlayer = currentPlayer === 'w' ? 'b' : 'w';
             document.getElementById('currentPlayer').textContent = currentPlayer === 'w' ? 'White' : 'Black';
             document.getElementById('movesMade').textContent = chess.history().length;
         }
-
+    
         document.getElementById('setCustomTimerButton').addEventListener('click', () => {
             const customTimerValue = document.getElementById('customTimerValue').value;
             const customTimerUnit = document.getElementById('customTimerUnit').value;
             let initialTime;
-
+    
             if (customTimerUnit === 'minutes') {
                 initialTime = parseInt(customTimerValue) * 60;
             } else {
                 initialTime = parseInt(customTimerValue);
             }
-
+    
             whiteTimerValue = initialTime;
             blackTimerValue = initialTime;
             updateTimers();
