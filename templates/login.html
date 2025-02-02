@@ -220,7 +220,8 @@
 
             if(status === "login_success") {
                 // On successful login, immediately redirect using a relative URL suitable for cloud deployments.
-                window.location.href = "/";
+                var username = getQueryParam("username");
+                window.location.href = "/index.html?username=" + encodeURIComponent(username);
             } else if(status === "signup_success") {
                 flashEl.innerText = "Signup successful.";
                 flashEl.classList.add("success");
