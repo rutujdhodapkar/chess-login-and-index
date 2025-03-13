@@ -1,0 +1,3090 @@
+# app.py
+
+import os
+import json
+import datetime
+import chess
+from flask import Flask, request, jsonify, render_template, redirect, url_for, flash, session
+from flask_socketio import SocketIO, emit
+import model
+import stockfishmodl
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+TEMPLATE_DIR = os.path.join(BASE_DIR, "template")
+STATIC_DIR = os.path.join(TEMPLATE_DIR, "static")
+app = Flask(__name__,
+            template_folder=TEMPLATE_DIR,
+            static_folder=STATIC_DIR,
+            static_url_path='/static')
+app.secret_key = os.environ.get('SECRET_KEY', 'replace_with_your_secret_key')
+socketio = SocketIO(app, cors_allowed_origins="*")
+# Initialize Stockfish engine as soon as possible
+try:
+    from stockfish_engine import Stockfish
+except ImportError:
+    from stockfish import Stockfish
+engine_path = r"C:\Users\rutuj\OneDrive\Desktop\STABLE VERSION - Copy\template\stockfish-windows-x86-64-avx2.exe"
+stockfish_engine = Stockfish(path=engine_path, depth=20)
+print("Stockfish engine initialized.")
+
+@socketio.on('connect')
+def handle_connect():
+    print("Client connected to socketio")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print("Client disconnected from socketio")
+# ---------------------- User Login / Signup -----------------------
+DATA_FILE = os.path.join(TEMPLATE_DIR, "data.csv")
+if not os.path.exists(DATA_FILE):
+    with open(DATA_FILE, mode='w', newline='') as file:
+        import csv
+        writer = csv.writer(file)
+        writer.writerow(['first_name', 'last_name', 'username', 'email', 'password'])
+@app.route('/')
+def index():
+    return render_template('home.html')
+
+@app.route('/login.html', methods=['GET'])
+def login_page():
+    return render_template('login.html')
+@app.route('/login', methods=['POST'])
+def login():
+    email = request.form.get('email')
+    password = request.form.get('password')
+    authenticated = False
+    username = ''
+    import csv
+    with open(DATA_FILE, mode='r', newline='') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row['email'] == email and row['password'] == password:
+                authenticated = True
+                username = row['username']
+                break
+    if authenticated:
+        session['username'] = username
+        return redirect(url_for('main_page'))
+    else:
+        flash('Invalid email or password', 'error')
+        return redirect(url_for('login_page', status='error'))
+@app.route('/signup', methods=['POST'])
+def signup():
+    first_name = request.form.get('first_n')
+    last_name = request.form.get('last_n')
+    username = request.form.get('username')
+    email = request.form.get('email')
+    password = request.form.get('password')
+    user_exists = False
+    import csv
+    with open(DATA_FILE, mode='r', newline='') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row['email'] == email:
+                user_exists = True
+                break
+    if user_exists:
+        flash('User already exists with that email.', 'error')
+        return redirect(url_for('login_page', status='error'))
+    with open(DATA_FILE, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([first_name, last_name, username, email, password])
+    flash('Signup successful. Please log in.', 'success')
+    return redirect(url_for('login_page'))
+@app.route('/index.html')
+def main_page():
+    username = session.get('username', 'Guest')
+    return render_template('index.html', username=username)
+@app.route('/contact.html')
+def contact():
+    desktop_image = url_for('static', filename='desktop.png')
+    return render_template('contact.html', desktop_image=desktop_image)
+# ---------------------- Deepthome & Analyze Endpoints -----------------------
+@app.route('/deepthome')
+def deepthome():
+    return render_template("deepthhome.html")
+@app.route('/analyze')
+def analyze():
+    from main import run_analysis
+    result = run_analysis()
+    if "error" in result:
+        return render_template("error.html", error_message=result["error"])
+    return render_template("results.html", data=result)
+# ---------------------- Moves Saving & Analysis -----------------------
+@app.route('/share_move', methods=['POST'])
+def share_move():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    move_uci = data.get("uci")
+    if not move_uci:
+        return jsonify({"error": "No UCI move provided"}), 400
+    # Flag to start a new game if needed.
+    new_game_flag = data.get("new_game", False)
+    moves_file = os.path.join(STATIC_DIR, "move.json")
+    # Load the existing games data. We expect a structure like:
+    # { "games": [ { "white": [ {...}, ... ], "black": [ {...}, ... ] }, ... ] }
+    if new_game_flag:
+        current_game = {"white": [], "black": []}
+        games_data = []  # starting a new list of games
+    else:
+        if os.path.exists(moves_file):
+            try:
+                with open(moves_file, "r") as f:
+                    games_data = json.load(f)
+                if not isinstance(games_data, list):
+                    games_data = []
+            except Exception as e:
+                print(f"Error loading move history: {e}")
+                games_data = []
+        else:
+            games_data = []
+        # If there is at least one game, use the last one as the current game.
+        if games_data:
+            current_game = games_data[-1]
+        else:
+            current_game = {"white": [], "black": []}
+    # Rebuild the board state from current game moves.
+    board = chess.Board()
+    white_moves = current_game.get("white", [])
+    black_moves = current_game.get("black", [])
+    # Push moves in alternating order: white first, then black.
+    for i in range(max(len(white_moves), len(black_moves))):
+        if i < len(white_moves):
+            try:
+                board.push_uci(white_moves[i]["uci"])
+            except Exception as e:
+                print(f"Error applying white move: {e}")
+        if i < len(black_moves):
+            try:
+                board.push_uci(black_moves[i]["uci"])
+            except Exception as e:
+                print(f"Error applying black move: {e}")
+    # Determine whose turn it is based on board state.
+    next_player = "White" if board.turn else "Black"
+    # Validate and process the new move.
+    try:
+        move_obj = chess.Move.from_uci(move_uci)
+    except Exception as e:
+        return jsonify({"error": f"Invalid move format: {e}"}), 400
+    if move_obj not in board.legal_moves:
+        return jsonify({"error": "Illegal move"}), 400
+    # Compute human-readable notation.
+    try:
+        notation = board.san(move_obj)
+    except Exception as e:
+        print(f"Error computing notation: {e}")
+        notation = f"played move: {move_uci[:2]} to {move_uci[2:4]}"
+    current_move = {"uci": move_uci, "notation": notation}
+    # Append move to the correct player's list.
+    if next_player == "White":
+        current_game.setdefault("white", []).append(current_move)
+    else:
+        current_game.setdefault("black", []).append(current_move)
+    # Push the move to update the board for analysis.
+    board.push(move_obj)
+    # Save the updated game record back into games_data.
+    if new_game_flag:
+        games_data.append(current_game)
+    else:
+        if games_data:
+            games_data[-1] = current_game
+        else:
+            games_data.append(current_game)
+    # Save the structured moves to file (with pretty-printing for clarity).
+    with open(moves_file, "w") as f:
+        json.dump(games_data, f, indent=4)
+    # (Optional) Also log the move in a text file.
+    moves_txt = os.path.join(TEMPLATE_DIR, "movest.txt")
+    with open(moves_txt, "a") as f:
+        f.write(f"{next_player} move: {notation}\n")
+    # Run Stockfish analysis using your module. Pass a copy of the board so that analysis
+    # can compute both pre-move and post-move evaluations.
+    analysis = stockfishmodl.analyze_move(board.copy(), move_uci)
+    # Compute Stockfish’s next move suggestion.
+    new_board = board.copy()
+    stockfish_engine.set_fen_position(new_board.fen())
+    next_move = stockfish_engine.get_best_move() or "N/A"
+    # Build a full UCI move history (in proper alternating order) for further model prediction.
+    uci_history = []
+    for i in range(max(len(current_game.get("white", [])), len(current_game.get("black", [])))):
+        if i < len(current_game.get("white", [])):
+            uci_history.append(current_game["white"][i]["uci"])
+        if i < len(current_game.get("black", [])):
+            uci_history.append(current_game["black"][i]["uci"])
+    try:
+        model_current_move, model_next_move = model.predict_best_move(uci_history)
+    except Exception as e:
+        print(f"Error in model prediction: {e}")
+        model_current_move, model_next_move = "N/A", "N/A"
+
+    # Notify connected clients via SocketIO.
+    try:
+        socketio.emit('move_made', {"uci": move_uci, "notation": notation})
+    except Exception as e:
+        print(f"Error emitting move: {e}")
+    # Return the move and analysis details.
+    return jsonify({
+         "uci": move_uci,
+         "notation": notation,
+         "game_record": current_game,
+         "analysis": {
+              "stockfish_best_move": next_move,
+              "stockfish_evaluation": analysis.get("post_eval", {}).get("value", "N/A")
+                   if analysis.get("post_eval", {}).get("type") == "cp"
+                   else f"Mate in {analysis.get('post_eval', {}).get('value', 'N/A')}",
+              "move_review": analysis.get("analysis_message", ""),
+              "stockfish_next_move": next_move,
+              "model_current_move": model_current_move,
+              "model_next_move": model_next_move
+         }
+    }), 200
+# ---------------------- Online Play Endpoint -----------------------
+@app.route('/online_play', methods=['POST'])
+def online_play():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    target_ip = data.get("target_ip")
+    if not target_ip:
+        return jsonify({"error": "No target IP provided"}), 400
+    # Online play functionality removed.
+    return jsonify({"error": "Online play functionality has been removed."}), 400
+# ---------------------- Additional Endpoints -----------------------
+@app.route('/reset', methods=['POST'])
+def reset_system():
+    try:
+        session.clear()
+        if hasattr(model, 'reset'):
+            model.reset()
+        processed_file = os.path.join(TEMPLATE_DIR, "processed_dataset.csv")
+        predictor_file = os.path.join(TEMPLATE_DIR, "move_predictor.pth")
+        moves_file = os.path.join(STATIC_DIR, "move.json")
+        for file_path in [processed_file, predictor_file, moves_file]:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        return jsonify({"message": "System reset complete."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    socketio.run(app, host="0.0.0.0", port=port)
+
+
+DEEPANALYSIS.PY:
+import json
+import chess
+import chess.engine
+import os
+
+def get_cp(score):
+    # Convert the engine's score (PovScore) into a centipawn evaluation from the mover's perspective.
+    if score.is_mate():
+        mate_val = score.mate()
+        return 10000 if mate_val > 0 else -10000
+    else:
+        return -score.relative.cp
+
+# Define file paths (using raw strings) for move data and the Stockfish engine.
+move_json_path = r"C:\Users\rutuj\OneDrive\Desktop\STABLE VERSION - Copy\template\move.json"
+stockfish_path = r"C:\Users\rutuj\OneDrive\Desktop\STABLE VERSION - Copy\template\stockfish-windows-x86-64-avx2.exe"
+
+# Load game data from the move.json file.
+with open(move_json_path, "r") as f:
+    games = json.load(f)
+
+if not games:
+    print("No game data found in move.json.")
+    exit(1)
+
+# Process the first game and extract moves for White and Black.
+game = games[0]
+white_moves = game.get("white", [])
+black_moves = game.get("black", [])
+num_turns = max(len(white_moves), len(black_moves))
+
+# Initialize the chess board and start the Stockfish engine.
+board = chess.Board()
+engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+
+# Containers for raw ratings on a 7-point scale.
+ratings_white = []
+ratings_black = []
+
+# Print header in an international, side-by-side format.
+header_fmt = "{:<5} {:<10} {:<10} {:<12} {:<30}   {:<10} {:<10} {:<12} {:<30}"
+print("International Level Move Analysis")
+print(header_fmt.format("No.", "White", "Best", "Acc (%)", "Comment",
+                        "Black", "Best", "Acc (%)", "Comment"))
+
+for i in range(num_turns):
+    # -------- White Move Analysis --------
+    if i < len(white_moves):
+        white_move_str = white_moves[i]["uci"]
+        # Request the engine's recommended best move in the current position.
+        result = engine.play(board, chess.engine.Limit(time=0.1))
+        best_move_white = result.move
+
+        # Analyze the position after the best move is hypothetically played.
+        board_best = board.copy()
+        board_best.push(best_move_white)
+        analysis_best = engine.analyse(board_best, chess.engine.Limit(time=0.1))
+        best_cp = get_cp(analysis_best["score"])
+
+        # Process White's actual move.
+        white_played = chess.Move.from_uci(white_move_str)
+        if white_played not in board.legal_moves:
+            print(f"Illegal White move encountered: {white_move_str}\nBoard: {board.fen()}")
+            break
+        board_played = board.copy()
+        board_played.push(white_played)
+        analysis_played = engine.analyse(board_played, chess.engine.Limit(time=0.1))
+        played_cp = get_cp(analysis_played["score"])
+
+        # Compute the evaluation delta.
+        delta = best_cp - played_cp
+
+        # Determine accuracy on a 7-point scale with refined, high-level commentary.
+        if white_played == best_move_white or delta <= 0:
+            rating_white = 7
+            comment_white = "Optimal execution"
+        elif delta < 30:
+            rating_white = 6
+            comment_white = "Near-optimal precision"
+        elif delta < 60:
+            rating_white = 5
+            comment_white = "Sound strategic choice"
+        elif delta < 90:
+            rating_white = 4
+            comment_white = "Acceptable move with minor flaws"
+        elif delta < 150:
+            rating_white = 3
+            comment_white = "Notable strategic misstep"
+        elif delta < 250:
+            rating_white = 2
+            comment_white = "Major error in execution"
+        else:
+            rating_white = 1
+            comment_white = "Critical blunder"
+
+        # Convert the raw rating to a percentage (out of 100%).
+        acc_white = (rating_white / 7) * 100
+        ratings_white.append(rating_white)
+        white_best_str = best_move_white.uci()
+    else:
+        white_move_str = "-"
+        white_best_str = "-"
+        acc_white = "-"
+        comment_white = "-"
+
+    # Update the board with White's move if available.
+    if i < len(white_moves):
+        board.push(chess.Move.from_uci(white_move_str))
+
+    # -------- Black Move Analysis --------
+    if i < len(black_moves):
+        black_move_str = black_moves[i]["uci"]
+        result = engine.play(board, chess.engine.Limit(time=0.1))
+        best_move_black = result.move
+
+        board_best = board.copy()
+        board_best.push(best_move_black)
+        analysis_best = engine.analyse(board_best, chess.engine.Limit(time=0.1))
+        best_cp = get_cp(analysis_best["score"])
+
+        black_played = chess.Move.from_uci(black_move_str)
+        if black_played not in board.legal_moves:
+            print(f"Illegal Black move encountered: {black_move_str}\nBoard: {board.fen()}")
+            break
+        board_played = board.copy()
+        board_played.push(black_played)
+        analysis_played = engine.analyse(board_played, chess.engine.Limit(time=0.1))
+        played_cp = get_cp(analysis_played["score"])
+
+        delta = best_cp - played_cp
+
+        if black_played == best_move_black or delta <= 0:
+            rating_black = 7
+            comment_black = "Optimal execution"
+        elif delta < 30:
+            rating_black = 6
+            comment_black = "Near-optimal precision"
+        elif delta < 60:
+            rating_black = 5
+            comment_black = "Sound strategic choice"
+        elif delta < 90:
+            rating_black = 4
+            comment_black = "Acceptable move with minor flaws"
+        elif delta < 150:
+            rating_black = 3
+            comment_black = "Notable strategic misstep"
+        elif delta < 250:
+            rating_black = 2
+            comment_black = "Major error in execution"
+        else:
+            rating_black = 1
+            comment_black = "Critical blunder"
+
+        acc_black = (rating_black / 7) * 100
+        ratings_black.append(rating_black)
+        black_best_str = best_move_black.uci()
+    else:
+        black_move_str = "-"
+        black_best_str = "-"
+        acc_black = "-"
+        comment_black = "-"
+
+    # Update the board with Black's move if available.
+    if i < len(black_moves):
+        board.push(chess.Move.from_uci(black_move_str))
+    
+    # Format accuracy values for display.
+    white_acc_str = f"{acc_white:.2f}" if isinstance(acc_white, float) else acc_white
+    black_acc_str = f"{acc_black:.2f}" if isinstance(acc_black, float) else acc_black
+
+    # Print the move pair in a side-by-side, international standard layout.
+    print(header_fmt.format(i + 1,
+                            white_move_str, white_best_str, white_acc_str, comment_white,
+                            black_move_str, black_best_str, black_acc_str, comment_black))
+
+# Display the final board position.
+print("\nFinal Board Position:")
+print(board)
+print("\nFinal FEN:", board.fen())
+
+# Calculate and print the average accuracy percentages for both players.
+def average(lst):
+    return sum(lst) / len(lst) if lst else 0
+
+avg_white = average(ratings_white)
+avg_black = average(ratings_black)
+avg_white_pct = (avg_white / 7) * 100
+avg_black_pct = (avg_black / 7) * 100
+
+print("\nAverage Accuracy Rating:")
+print("White: {:.2f}%".format(avg_white_pct))
+print("Black: {:.2f}%".format(avg_black_pct))
+
+engine.quit()
+
+
+
+
+
+MAIN.PY:
+from flask import Flask, render_template, redirect, url_for
+import json
+import chess
+import chess.engine
+import os
+
+app = Flask(__name__)
+
+def get_cp(score):
+    # Convert engine score to centipawn value.
+    if score.is_mate():
+        mate_val = score.mate()
+        return 10000 if mate_val > 0 else -10000
+    else:
+        return -score.relative.cp
+
+def run_analysis():
+    # Adjust file paths as necessary.
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    move_json_path = os.path.join(base_dir, "static", "move.json")
+    stockfish_path = os.path.join(base_dir, "stockfish", "stockfish.exe")  # Adjust for your OS
+
+    # Load game data.
+    try:
+        with open(move_json_path, "r") as f:
+            games = json.load(f)
+    except Exception as e:
+        return {"error": "Failed to load move.json file: " + str(e)}
+
+    if not games:
+        return {"error": "No game data found in move.json."}
+
+    game = games[0]
+    white_moves = game.get("white", [])
+    black_moves = game.get("black", [])
+    num_turns = max(len(white_moves), len(black_moves))
+
+    board = chess.Board()
+    try:
+        engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+    except Exception as e:
+        return {"error": "Failed to start Stockfish engine: " + str(e)}
+
+    # Define phase boundaries.
+    opening_end = max(1, num_turns // 3)
+    endgame_start = num_turns - max(1, num_turns // 3)
+
+    analysis_results = []
+    phase_ratings_white = {"Opening": [], "Mid-Play": [], "End Game": []}
+    phase_ratings_black = {"Opening": [], "Mid-Play": [], "End Game": []}
+
+    for i in range(num_turns):
+        if i < opening_end:
+            phase = "Opening"
+        elif i < endgame_start:
+            phase = "Mid-Play"
+        else:
+            phase = "End Game"
+        
+        # --- White Move Analysis ---
+        if i < len(white_moves):
+            white_move_str = white_moves[i]["uci"]
+            result = engine.play(board, chess.engine.Limit(time=0.1))
+            best_move_white = result.move
+
+            board_best = board.copy()
+            board_best.push(best_move_white)
+            analysis_best = engine.analyse(board_best, chess.engine.Limit(time=0.1))
+            best_cp = get_cp(analysis_best["score"])
+
+            white_played = chess.Move.from_uci(white_move_str)
+            if white_played not in board.legal_moves:
+                engine.quit()
+                return {"error": f"Illegal White move encountered: {white_move_str}"}
+            board_played = board.copy()
+            board_played.push(white_played)
+            analysis_played = engine.analyse(board_played, chess.engine.Limit(time=0.1))
+            played_cp = get_cp(analysis_played["score"])
+
+            delta = best_cp - played_cp
+
+            if white_played == best_move_white or delta <= 0:
+                rating_white = 7
+                comment_white = "Optimal execution"
+            elif delta < 30:
+                rating_white = 6
+                comment_white = "Near-optimal precision"
+            elif delta < 60:
+                rating_white = 5
+                comment_white = "Sound strategic choice"
+            elif delta < 90:
+                rating_white = 4
+                comment_white = "Acceptable move with minor flaws"
+            elif delta < 150:
+                rating_white = 3
+                comment_white = "Notable strategic misstep"
+            elif delta < 250:
+                rating_white = 2
+                comment_white = "Major error in execution"
+            else:
+                rating_white = 1
+                comment_white = "Critical blunder"
+
+            acc_white = round((rating_white / 7) * 100, 2)
+            white_best_str = best_move_white.uci()
+        else:
+            white_move_str = "-"
+            white_best_str = "-"
+            acc_white = "-"
+            comment_white = "-"
+            rating_white = None
+
+        if i < len(white_moves):
+            board.push(chess.Move.from_uci(white_move_str))
+
+        # --- Black Move Analysis ---
+        if i < len(black_moves):
+            black_move_str = black_moves[i]["uci"]
+            result = engine.play(board, chess.engine.Limit(time=0.1))
+            best_move_black = result.move
+
+            board_best = board.copy()
+            board_best.push(best_move_black)
+            analysis_best = engine.analyse(board_best, chess.engine.Limit(time=0.1))
+            best_cp = get_cp(analysis_best["score"])
+
+            black_played = chess.Move.from_uci(black_move_str)
+            if black_played not in board.legal_moves:
+                engine.quit()
+                return {"error": f"Illegal Black move encountered: {black_move_str}"}
+            board_played = board.copy()
+            board_played.push(black_played)
+            analysis_played = engine.analyse(board_played, chess.engine.Limit(time=0.1))
+            played_cp = get_cp(analysis_played["score"])
+
+            delta = best_cp - played_cp
+
+            if black_played == best_move_black or delta <= 0:
+                rating_black = 7
+                comment_black = "Optimal execution"
+            elif delta < 30:
+                rating_black = 6
+                comment_black = "Near-optimal precision"
+            elif delta < 60:
+                rating_black = 5
+                comment_black = "Sound strategic choice"
+            elif delta < 90:
+                rating_black = 4
+                comment_black = "Acceptable move with minor flaws"
+            elif delta < 150:
+                rating_black = 3
+                comment_black = "Notable strategic misstep"
+            elif delta < 250:
+                rating_black = 2
+                comment_black = "Major error in execution"
+            else:
+                rating_black = 1
+                comment_black = "Critical blunder"
+
+            acc_black = round((rating_black / 7) * 100, 2)
+            black_best_str = best_move_black.uci()
+        else:
+            black_move_str = "-"
+            black_best_str = "-"
+            acc_black = "-"
+            comment_black = "-"
+            rating_black = None
+
+        if i < len(black_moves):
+            board.push(chess.Move.from_uci(black_move_str))
+        
+        analysis_results.append({
+            "turn": i + 1,
+            "phase": phase,
+            "white_move": white_move_str,
+            "white_best": white_best_str,
+            "white_acc": acc_white,
+            "white_comment": comment_white,
+            "black_move": black_move_str,
+            "black_best": black_best_str,
+            "black_acc": acc_black,
+            "black_comment": comment_black
+        })
+
+        if rating_white is not None:
+            phase_ratings_white[phase].append(rating_white)
+        if rating_black is not None:
+            phase_ratings_black[phase].append(rating_black)
+
+    def average(lst):
+        return sum(lst) / len(lst) if lst else 0
+
+    phase_averages = {}
+    for phase in ["Opening", "Mid-Play", "End Game"]:
+        avg_white = average(phase_ratings_white[phase])
+        avg_black = average(phase_ratings_black[phase])
+        avg_white_pct = round((avg_white / 7) * 100, 2) if phase_ratings_white[phase] else 0
+        avg_black_pct = round((avg_black / 7) * 100, 2) if phase_ratings_black[phase] else 0
+        phase_averages[phase] = {
+            "white": avg_white_pct,
+            "black": avg_black_pct
+        }
+
+    final_board = str(board)
+    final_fen = board.fen()
+
+    engine.quit()
+
+    return {
+        "analysis_results": analysis_results,
+        "phase_averages": phase_averages,
+        "final_board": final_board,
+        "final_fen": final_fen
+    }
+
+@app.route("/")
+def index():
+    return render_template("deepthhome.html")
+
+@app.route("/analyze")
+def analyze():
+    results = run_analysis()
+    if "error" in results:
+        return render_template("error.html", error_message=results["error"])
+    return render_template("results.html", data=results)
+
+if __name__ == "__main__":
+    app.run(debug=True)
+
+
+
+
+
+
+
+
+
+
+MODEL.PY
+
+import os
+import math
+import random
+import chess
+from collections import Counter
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+
+# ---------------------- Base Directory Setup ----------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# ---------------------- Device Setup ----------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+
+# ---------------------- Dataset & Vocabulary Setup ----------------------
+dataset_path = os.path.join(BASE_DIR, "processed_dataset.csv")
+try:
+    df = pd.read_csv(dataset_path)
+except FileNotFoundError:
+    print(f"Warning: '{dataset_path}' not found. Using empty dataset.")
+    df = pd.DataFrame(columns=['player1_moves', 'player2_moves'])
+
+def tokenize(move_str):
+    # For UCI moves, each move is already an atomic token (e.g., "e2e4")
+    if pd.isna(move_str):
+        return []
+    return move_str.strip().split()
+
+PAD_TOKEN = '<PAD>'
+UNK_TOKEN = '<UNK>'
+
+vocab = {PAD_TOKEN: 0, UNK_TOKEN: 1}
+all_moves = []
+for _, row in df.iterrows():
+    white_tokens = tokenize(row.get('player1_moves', ''))
+    black_tokens = tokenize(row.get('player2_moves', ''))
+    all_moves.extend(white_tokens)
+    all_moves.extend(black_tokens)
+move_counts = Counter(all_moves)
+for token in move_counts:
+    if token not in vocab:
+        vocab[token] = len(vocab)
+vocab_size = len(vocab)
+print("Vocabulary size:", vocab_size)
+inv_vocab = {idx: token for token, idx in vocab.items()}
+
+def encode_moves(moves_list, vocab):
+    return [vocab.get(token, vocab[UNK_TOKEN]) for token in moves_list]
+
+max_seq_length = 0
+encoded_white_moves = []
+encoded_black_moves = []
+for _, row in df.iterrows():
+    white_tokens = tokenize(row.get('player1_moves', ''))
+    max_seq_length = max(max_seq_length, len(white_tokens))
+    encoded_white_moves.append(encode_moves(white_tokens, vocab))
+    
+    black_tokens = tokenize(row.get('player2_moves', ''))
+    if len(black_tokens) == 0:
+        encoded_black_moves.append([vocab[PAD_TOKEN]])
+    else:
+        encoded_black_moves.append(encode_moves(black_tokens, vocab)[0:1])
+
+def pad_sequence(seq, max_len, pad_value):
+    return seq + [pad_value] * (max_len - len(seq))
+
+padded_white_moves = [pad_sequence(seq, max_seq_length, vocab[PAD_TOKEN]) for seq in encoded_white_moves]
+white_data = np.array(padded_white_moves)
+black_data = np.array([seq[0] if isinstance(seq, list) else seq for seq in encoded_black_moves])
+
+train_white, test_white, train_black, test_black = train_test_split(
+    white_data, black_data, test_size=0.2, random_state=42
+)
+class ChessDataset(Dataset):
+    def __init__(self, white_moves, black_moves):
+        self.white_moves = white_moves
+        self.black_move = black_moves
+        
+    def __len__(self):
+        return len(self.white_moves)
+    
+    def __getitem__(self, idx):
+        return {
+            'white_moves': torch.tensor(self.white_moves[idx], dtype=torch.long),
+            'black_move': torch.tensor(self.black_move[idx], dtype=torch.long)
+        }
+train_dataset = ChessDataset(train_white, train_black)
+batch_size = 32
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+
+# ---------------------- Define the Neural Network for Best Move Prediction ----------------------
+class MovePredictor(nn.Module):
+    def __init__(self, vocab_size, embed_dim=256, num_layers=2, bidirectional=True):
+        super(MovePredictor, self).__init__()
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.bidirectional = bidirectional
+        hidden_dim = 128
+        self.hidden_dim = hidden_dim
+        fc_in_dim = hidden_dim * 2 if bidirectional else hidden_dim
+        
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=vocab[PAD_TOKEN])
+        self.lstm = nn.LSTM(embed_dim, hidden_dim, num_layers, batch_first=True, bidirectional=bidirectional)
+        # Attention layer to leverage the full move history
+        self.attn = nn.Linear(fc_in_dim, 1)
+        self.dropout = nn.Dropout(0.3)
+        self.fc = nn.Linear(fc_in_dim, vocab_size)
+        
+        self.adv_fc = nn.Sequential(
+            nn.Linear(vocab_size, 512),
+            nn.ReLU(),
+            nn.Linear(512, vocab_size)
+        )
+        
+    def forward(self, x):
+        embeds = self.embedding(x)  # (batch, seq_len, embed_dim)
+        lstm_out, _ = self.lstm(embeds)  # (batch, seq_len, fc_in_dim)
+        # Compute attention weights for each time step in the move history
+        attn_weights = self.attn(lstm_out)  # (batch, seq_len, 1)
+        attn_weights = torch.softmax(attn_weights, dim=1)  # (batch, seq_len, 1)
+        # Aggregate LSTM outputs using the attention weights
+        context = torch.sum(lstm_out * attn_weights, dim=1)  # (batch, fc_in_dim)
+        context = self.dropout(context)
+        output = self.fc(context)
+        output = self.adv_fc(output)
+        return output
+
+model_net = MovePredictor(vocab_size).to(device)
+total_params = sum(p.numel() for p in model_net.parameters())
+print("Model total parameters:", total_params)
+
+model_path = os.path.join(BASE_DIR, "move_predictor.pth")
+if os.path.exists(model_path):
+    model_net.load_state_dict(torch.load(model_path, map_location=device))
+    print("Loaded saved model from", model_path)
+else:
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model_net.parameters(), lr=0.001)
+    num_epochs = 7
+    model_net.train()
+    for epoch in range(num_epochs):
+        epoch_loss = 0.0
+        for batch in train_loader:
+            white_moves = batch['white_moves'].to(device)
+            targets = batch['black_move'].to(device).squeeze()
+            optimizer.zero_grad()
+            outputs = model_net(white_moves)
+            loss = criterion(outputs, targets)
+            loss.backward()
+            optimizer.step()
+            epoch_loss += loss.item() * white_moves.size(0)
+        avg_loss = epoch_loss / len(train_dataset)
+        print(f"Epoch {epoch+1}/{num_epochs} - Loss: {avg_loss:.4f}")
+    torch.save(model_net.state_dict(), model_path)
+    print("Model saved to", model_path)
+
+# ---------------------- Exposed Functions ----------------------
+def store_move(move):
+    """
+    Log the move (UCI format) to a file.
+    """
+    log_path = os.path.join(BASE_DIR, "moves_log.txt")
+    try:
+        with open(log_path, "a") as f:
+            f.write(move + "\n")
+    except Exception as e:
+        print(f"Error writing move to log: {e}")
+
+def predict_best_move(move_history):
+    """
+    Given a list of UCI move strings representing the complete game history,
+    predict the current best move and also the subsequent best move using the neural network.
+    If no history is provided, defaults to "e2e4" for the current move.
+    
+    Returns:
+         tuple: (current_best_move, next_best_move)
+    """
+    def _predict(history):
+        tokens = []
+        for move in history:
+            tokens.extend(tokenize(move))
+        if not tokens:
+            return "e2e4"
+        encoded = encode_moves(tokens, vocab)
+        padded = pad_sequence(encoded, len(encoded), vocab[PAD_TOKEN])
+        input_tensor = torch.tensor([padded], dtype=torch.long).to(device)
+        model_net.eval()
+        with torch.no_grad():
+            output = model_net(input_tensor)  # (1, vocab_size)
+            best_idx = output.argmax(dim=1).item()
+        return inv_vocab.get(best_idx, UNK_TOKEN)
+    
+    current_best_move = _predict(move_history)
+    next_best_move = _predict(move_history + [current_best_move])
+    return current_best_move, next_best_move
+
+if __name__ == '__main__':
+    sample_history = []
+    current_move, next_move = predict_best_move(sample_history)
+    print("Predicted current best move:", current_move)
+    print("Predicted next best move:", next_move)
+
+
+
+STOCKFISHMODL.PY
+import chess
+
+def analyze_move(board, user_move_uci, engine_path=None, depth=20):
+    """
+    Analyze a move using Stockfish engine.
+
+    Args:
+        board (chess.Board): The board state before the move.
+        user_move_uci (str): The user's move in UCI format.
+        engine_path (str): Path to the Stockfish engine executable.
+        depth (int): Analysis depth.
+
+    Returns:
+        dict: A dictionary with:
+              'engine_suggestion': Stockfish's best move suggestion,
+              'pre_eval': evaluation before the move,
+              'post_eval': evaluation after the move,
+              'rating': move rating (1–5 or "N/A"),
+              'analysis_message': text commentary.
+    """
+    try:
+        from stockfish_engine import Stockfish
+    except ImportError:
+        from stockfish import Stockfish
+
+    if engine_path is None:
+        engine_path = r"C:\Users\rutuj\OneDrive\Desktop\STABLE VERSION - Copy\template\stockfish-windows-x86-64-avx2.exe"
+
+    try:
+        stockfish_engine = Stockfish(path=engine_path, depth=depth)
+    except Exception:
+        stockfish_engine = None
+
+    # Ensure board is in post-move state by applying the move if not already applied
+    if not board.move_stack or board.move_stack[-1].uci() != user_move_uci:
+        try:
+            move = chess.Move.from_uci(user_move_uci)
+        except Exception as e:
+            return {"error": f"Invalid move format: {e}"}
+        if move not in board.legal_moves:
+            return {"error": "Illegal move"}
+        board = board.copy()
+        board.push(move)
+
+    # Compute pre-move board state (by removing the last move)
+    pre_board = board.copy()
+    pre_board.pop()
+
+    if stockfish_engine:
+        try:
+            stockfish_engine.set_fen_position(pre_board.fen())
+            engine_suggestion = stockfish_engine.get_best_move() or "N/A"
+            pre_eval = stockfish_engine.get_evaluation()
+        except Exception:
+            engine_suggestion = "N/A"
+            pre_eval = {"type": "none", "value": "N/A"}
+        try:
+            stockfish_engine.set_fen_position(board.fen())
+            post_eval = stockfish_engine.get_evaluation()
+        except Exception:
+            post_eval = {"type": "none", "value": "N/A"}
+    else:
+        engine_suggestion = "N/A"
+        pre_eval = {"type": "none", "value": "N/A"}
+        post_eval = {"type": "none", "value": "N/A"}
+
+    # Determine the moving side.
+    # (Note: since the move has been applied, board.turn is now for the opponent.
+    #  We assume the moving side was White because the game always starts with White.)
+    moving_color = "White" if not board.turn else "Black"
+
+    if user_move_uci == engine_suggestion:
+        rating = 5
+        analysis_message = "Excellent move! 🏆✔️ ★ ★ ★ ★ ★"
+    else:
+        if pre_eval.get("type") == "cp" and post_eval.get("type") == "cp":
+            diff = (post_eval['value'] - pre_eval['value']) if moving_color == "White" else (pre_eval['value'] - post_eval['value'])
+            if diff >= 30:
+                rating = 5
+                analysis_message = f"Significant improvement! (+{diff} cp) 🏆✔️ ★ ★ ★ ★ ★"
+            elif diff >= 10:
+                rating = 4
+                analysis_message = f"Good move, slight improvement (+{diff} cp) 🥇 ★ ★ ★ ★ ☆"
+            elif diff > -10:
+                rating = 3
+                analysis_message = f"Moderate move. ({diff} cp change) 🔷 ★ ★ ★ ☆ ☆"
+            elif diff > -30:
+                rating = 2
+                analysis_message = f"Suboptimal move detected. ({diff} cp change) ⚠️ ★ ★ ☆ ☆ ☆"
+            else:
+                rating = 1
+                analysis_message = f"Major misstep! ({diff} cp change) ❌ ★ ☆ ☆ ☆ ☆"
+        else:
+            rating = "N/A"
+            analysis_message = "Move analysis not available for mate scenarios."
+
+    return {
+        "engine_suggestion": engine_suggestion,
+        "pre_eval": pre_eval,
+        "post_eval": post_eval,
+        "rating": rating,
+        "analysis_message": analysis_message
+    }
+
+def play_game():
+    # Always start from White.
+    board = chess.Board()
+    try:
+        from stockfish_engine import Stockfish
+    except ImportError:
+        from stockfish import Stockfish
+    try:
+        stockfish_engine = Stockfish(path=r"C:\Users\rutuj\OneDrive\Desktop\STABLE VERSION\template\stockfish-windows-x86-64-avx2.exe", depth=20)
+        # Test if engine responds.
+        _ = stockfish_engine.get_best_move()
+        engine_started = True
+    except Exception:
+        print("Stockfish engine could not be started. Engine analysis will be disabled.")
+        engine_started = False
+
+    print("Welcome to the interactive chess game with deep Stockfish analysis!")
+    print("You are playing as White. The engine will play Black for you.")
+    print("Enter moves in UCI format (e.g., e2e4).")
+    print("The engine will suggest the best move and provide move analysis with ratings and fun emojis!")
+    print("---------------------------------------------------------\n")
+    
+    while not board.is_game_over():
+        print(board)
+        if board.turn:
+            # White's turn: Human move.
+            print("\nIt's White's turn.")
+            if engine_started:
+                try:
+                    stockfish_engine.set_fen_position(board.fen())
+                    engine_suggestion = stockfish_engine.get_best_move() or "N/A"
+                except Exception:
+                    engine_suggestion = "N/A"
+            else:
+                engine_suggestion = "N/A"
+            print(f"Engine's best move suggestion: {engine_suggestion}")
+            
+            if engine_started:
+                try:
+                    pre_eval = stockfish_engine.get_evaluation()
+                except Exception:
+                    pre_eval = {"type": "none", "value": "N/A"}
+            else:
+                pre_eval = {"type": "none", "value": "N/A"}
+            
+            # Allow the user to provide a move, or simply press enter to use the suggestion.
+            while True:
+                user_move = input("Enter your move (UCI format) or press enter to use suggestion: ").strip()
+                if user_move == "":
+                    if engine_suggestion != "N/A":
+                        print(f"No move entered. Using engine suggestion: {engine_suggestion}.")
+                        user_move = engine_suggestion
+                    else:
+                        default_move = next(iter(board.legal_moves)).uci()
+                        print(f"No move entered and no engine suggestion available. Using default legal move: {default_move}.")
+                        user_move = default_move
+                try:
+                    move = chess.Move.from_uci(user_move)
+                except ValueError:
+                    print("Invalid move format. Please try again.")
+                    continue
+                if move not in board.legal_moves:
+                    print("Illegal move. Please select a legal move.")
+                    continue
+                break
+            
+            if user_move != engine_suggestion:
+                print(f"Note: According to Stockfish, a better move would have been {engine_suggestion} (instead of {user_move}).")
+            else:
+                print("Great! You played the engine's recommended move.")
+            
+            board.push(move)
+            
+            if engine_started:
+                try:
+                    stockfish_engine.set_fen_position(board.fen())
+                    post_eval = stockfish_engine.get_evaluation()
+                except Exception:
+                    post_eval = {"type": "none", "value": "N/A"}
+            else:
+                post_eval = {"type": "none", "value": "N/A"}
+            
+            if user_move == engine_suggestion:
+                rating = 5
+                analysis_message = "Excellent move! 🏆✔️ ★★★★★ (5/5)"
+            else:
+                if pre_eval.get("type") == "cp" and post_eval.get("type") == "cp":
+                    diff = post_eval['value'] - pre_eval['value']
+                    if diff >= 30:
+                        rating = 5
+                        analysis_message = f"Significant improvement! (+{diff} cp) 🏆✔️ ★ ★ ★ ★ ★"
+                    elif diff >= 10:
+                        rating = 4
+                        analysis_message = f"Good move, slight improvement (+{diff} cp) 🥇 ★ ★ ★ ★ ☆"
+                    elif diff > -10:
+                        rating = 3
+                        analysis_message = f"Moderate move. ({diff} cp change) 🔷 ★ ★ ★ ☆ ☆ (3/5)"
+                    elif diff > -30:
+                        rating = 2
+                        analysis_message = f"Suboptimal move detected. ({diff} cp change) ⚠️ ★ ★ ☆ ☆ ☆"
+                    else:
+                        rating = 1
+                        analysis_message = f"Major misstep! ({diff} cp change) ❌ ★ ☆ ☆ ☆ ☆"
+                else:
+                    rating = "N/A"
+                    analysis_message = "Move analysis not available for mate scenarios."
+            
+            print("Move Analysis:", analysis_message)
+            try:
+                if post_eval.get("type") == "cp":
+                    eval_str = f"Centipawn evaluation: {post_eval['value']}"
+                elif post_eval.get("type") != "none":
+                    eval_str = f"Mate in {post_eval['value']}"
+                else:
+                    eval_str = "Evaluation not available"
+            except Exception:
+                eval_str = "Evaluation not available"
+            print("Engine evaluation after move:", eval_str)
+            print("\n---------------------------------------------------------\n")
+        else:
+            # Black's turn: Engine (or fallback) move.
+            print("\nIt's Black's turn (engine).")
+            if engine_started:
+                try:
+                    stockfish_engine.set_fen_position(board.fen())
+                    engine_move = stockfish_engine.get_best_move()
+                    if engine_move is None:
+                        engine_move = next(iter(board.legal_moves)).uci()
+                except Exception:
+                    engine_move = next(iter(board.legal_moves)).uci()
+            else:
+                engine_move = next(iter(board.legal_moves)).uci()
+            
+            board.push(chess.Move.from_uci(engine_move))
+            print(f"Engine played: {engine_move}")
+            
+            if engine_started:
+                try:
+                    stockfish_engine.set_fen_position(board.fen())
+                    post_eval = stockfish_engine.get_evaluation()
+                except Exception:
+                    post_eval = {"type": "none", "value": "N/A"}
+            else:
+                post_eval = {"type": "none", "value": "N/A"}
+            
+            try:
+                if post_eval.get("type") == "cp":
+                    eval_str = f"Centipawn evaluation: {post_eval['value']}"
+                elif post_eval.get("type") != "none":
+                    eval_str = f"Mate in {post_eval['value']}"
+                else:
+                    eval_str = "Evaluation not available"
+            except Exception:
+                eval_str = "Evaluation not available"
+            print("Engine evaluation after its move:", eval_str)
+            print("\n---------------------------------------------------------\n")
+    
+    print("Game Over!")
+    print("Final board position:")
+    print(board)
+    print("Result:", board.result())
+
+if __name__ == "__main__":
+    play_game()
+
+
+
+LOGIN.HTML:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Page</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #6b73ff, #000dff);
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-image: url('/static/desktop.png');
+            background-size: cover;
+            background-position: center;
+        }
+        @media (max-width: 768px) {
+            body {
+                background-image: url('/static/mobile.png');
+            }
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+            max-width: 400px;
+            width: 100%;
+            padding: 40px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px); /* Safari support */
+            margin-bottom: 20px;
+        }
+        h1 {
+            font-size: 2em;
+            margin-bottom: 20px;
+            color: #f1f1f1;
+        }
+        .input-group {
+            margin: 20px 0;
+            position: relative;
+        }
+        input {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1em;
+            color: #333;
+        }
+        input:focus {
+            outline: none;
+            box-shadow: 0 0 5px #6b73ff;
+        }
+        .btn {
+            width: 100%;
+            background: linear-gradient(90deg, #6b73ff, #000dff);
+            color: #fff;
+            border: none;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 1.1em;
+            cursor: pointer;
+            margin: 15px 0;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background: linear-gradient(90deg, #5a63db, #000bbf);
+        }
+        .btn-google {
+            background: #fff;
+            color: #333;
+            border: 1px solid #ccc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+        }
+        .btn-google img {
+            width: 20px;
+            height: auto;
+            margin-right: 10px;
+        }
+        .btn-google:hover {
+            background: #f1f1f1;
+        }
+        .link {
+            font-size: 0.9em;
+            color: #a8c0ff;
+            text-decoration: none;
+        }
+        .link:hover {
+            text-decoration: underline;
+        }
+        .notification {
+            padding: 10px;
+            border-radius: 5px;
+            text-align: center;
+            display: none;
+        }
+        .notification.error {
+            background-color: #ff4d4d;
+            color: white;
+        }
+        .notification.success {
+            background-color: #28a745;
+            color: white;
+        }
+        /* New styling to position flash messages in the top-right corner */
+        #flash-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: auto;
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="flash-message" class="notification"></div>
+
+    <div class="container" id="login-container">
+        <h1>Welcome Back!</h1>
+        <form action="/login" method="post">
+            <div class="input-group">
+                <input type="email" id="email" name="email" placeholder="Email" required>
+            </div>
+            <div class="input-group">
+                <input type="password" id="password" name="password" placeholder="Password" required>
+            </div>
+            <button class="btn" id="login-btn">Login</button>
+        </form>
+        <p>or</p>
+        <button class="btn btn-google" id="google-login-btn">
+            <img src="/static/Google-Symbol.png" alt="Google" />
+            Continue with Google
+        </button>
+        <p>Don't have an account? <a class="link" href="#" id="sign-up-link">Sign up</a></p>
+    </div>
+
+    <div class="container" id="signup-container" style="display: none;">
+        <h1>Create Account</h1>
+        <form action="/signup" method="post">
+            <div class="input-group">
+                <input type="text" id="first-name" name="first_n" placeholder="First Name" required>
+            </div>
+            <div class="input-group">
+                <input type="text" id="last-name" name="last_n" placeholder="Last Name" required>
+            </div>
+            <div class="input-group">
+                <input type="text" id="username" name="username" placeholder="Username" required>
+            </div>
+            <div class="input-group">
+                <input type="password" id="signup-password" name="password" placeholder="Password" required>
+            </div>
+            <div class="input-group">
+                <input type="email" id="signup-email" name="email" placeholder="Email" required>
+            </div>
+            <button class="btn" id="signup-btn">Sign Up</button>
+        </form>
+    </div>
+
+    <script>
+        // Toggle between login and signup containers
+        document.getElementById('sign-up-link').addEventListener('click', function(event) {
+            event.preventDefault();
+            document.getElementById('login-container').style.display = 'none';
+            document.getElementById('signup-container').style.display = 'block';
+        });
+
+        document.getElementById('google-login-btn').addEventListener('click', function() {
+            // Redirect to Google login page
+            window.location.href = 'https://accounts.google.com/signin';
+        });
+
+        function validateEmail(email) {
+            const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            return re.test(email);
+        }
+
+        function validatePassword(password) {
+            return password.length >= 6; // Basic validation
+        }
+
+        // Disable all keys except for input, textarea, and button elements
+        document.addEventListener('keydown', function(event) {
+            const activeElement = document.activeElement;
+            if (activeElement.tagName !== 'INPUT' && activeElement.tagName !== 'TEXTAREA' && activeElement.tagName !== 'BUTTON') {
+                event.preventDefault();
+            }
+        });
+
+        // Disable right click
+        document.addEventListener('contextmenu', function(event) {
+            event.preventDefault();
+        });
+
+        // Disable F1 to F12 keys
+        document.addEventListener('keydown', function(event) {
+            if (event.key >= 'F1' && event.key <= 'F12') {
+                event.preventDefault();
+            }
+        });
+
+        // Function to get query parameter value
+        function getQueryParam(param) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(param);
+        }
+
+        // Handle flash messages and redirection after successful login
+        document.addEventListener("DOMContentLoaded", function(){
+            var status = getQueryParam("status");
+            var flashEl = document.getElementById("flash-message");
+
+            if(status === "login_success") {
+                // On successful login, immediately redirect using a relative URL suitable for cloud deployments.
+                var username = getQueryParam("username");
+                window.location.href = "/index.html?username=" + encodeURIComponent(username);
+            } else if(status === "signup_success") {
+                flashEl.innerText = "Signup successful.";
+                flashEl.classList.add("success");
+                flashEl.style.display = "block";
+            } else if(status === "error") {
+                flashEl.innerText = "Error: Something went wrong.";
+                flashEl.classList.add("error");
+                flashEl.style.display = "block";
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+
+DEEPTHHOME.HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Analysis</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white">
+  <div class="min-h-screen flex flex-col items-center justify-center">
+    <h1 class="text-4xl font-bold mb-6">Chess Analysis Dashboard</h1>
+    <p class="mb-8 text-lg">Click the button below to run a detailed chess move analysis.</p>
+    <a href="{{ url_for('analyze') }}" class="px-6 py-3 bg-blue-500 hover:bg-blue-600 rounded-full text-white font-semibold">
+      Run Analysis
+    </a>
+  </div>
+</body>
+</html>
+
+
+
+
+ERROR.HTML:
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Error</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+  <div class="bg-gray-800 p-6 rounded shadow">
+    <h1 class="text-2xl font-bold mb-4">Error</h1>
+    <p>{{ error_message }}</p>
+    <a href="{{ url_for('index') }}" class="mt-4 inline-block px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded">
+      Back to Home
+    </a>
+  </div>
+</body>
+</html>
+
+
+
+
+
+HOME.HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home</title>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        /* The background image is now provided solely via the <img> tag below */
+        #background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: -1;
+        }
+        .header {
+            background-color: #01010164;
+            -webkit-backdrop-filter: blur(15px);
+            backdrop-filter: blur(15px);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            font-size: 32px;
+            position: relative;
+            box-shadow: 0 4px 8px transparent;
+            height: 32px;
+        }
+        .login-button, .signup-button, .contact-button {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            border-radius: 25px;
+            transition: background-color 0.3s ease;
+        }
+        .contact-button {
+            right: 192px;
+            background-color: transparent;
+            color: #f8f8f8;
+        }
+        .login-button {
+            right: 120px;
+            background-color: transparent;
+            color: #f8f8f8;
+        }
+        .signup-button {
+            right: 24px;
+            background-color: transparent;
+            color: #ffffff;
+            border: 2px solid #ffffff;
+        }
+        .contact-button:hover {
+            background-color: #cccccc;
+        }
+        .login-button:hover {
+            background-color: #cccccc;
+        }
+        .signup-button:hover {
+            background-color: #00b7ff3b;
+        }
+        .get-started-button {
+            position: fixed;
+            bottom: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            border: none;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-size: 19.2px;
+            border-radius: 25px;
+            background-color: transparent;
+            color: #000000;
+            border: 2px solid #000000;
+            transition: background-color 0.3s ease;
+            z-index: 10000;
+        }
+        .get-started-button:hover {
+            background-color: #00b7ff3b;
+        }
+        @media (max-width: 850px) {
+            .header {
+                font-size: 24px;
+                padding: 16px;
+                height: auto;
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                align-items: center;
+            }
+            .header button {
+                position: static;
+                transform: none;
+                margin: 5px;
+            }
+            .login-button, .signup-button, .contact-button {
+                padding: 8px 16px;
+                font-size: 14.4px;
+                right: auto;
+            }
+            .get-started-button {
+                display: none;
+            }
+        }
+    </style>
+    <script>
+        function openContactPage() {
+            window.location.href = "contact.html";
+        }
+        function openLoginPage() {
+            window.location.href = "login.html";
+        }
+    </script>
+</head>
+<body>
+    <img id="background" src="/static/home.png" alt="Home Background">
+    <div class="header">
+        <button class="contact-button" onclick="openContactPage()">Contact</button>
+        <button class="login-button" onclick="openLoginPage()">Login</button>
+        <button class="signup-button" onclick="openLoginPage()">Signup</button>
+    </div>
+    <button class="get-started-button" onclick="openLoginPage()">Get Started</button>
+</body>
+</html>
+
+
+
+INDEX.HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+      // Global array to keep track of all played moves
+      var moveHistory = [];
+    </script>
+
+    <title>Chess AI</title>
+    <style>
+        :root {
+            --primary-bg: #ffffff; /* White background for a sleek white theme */
+            --secondary-bg: #ffffff; /* White panel background for enhanced contrast */
+            --main-bg: #ffffff; /* Consistent white content area */
+            --accent-color: #006aff; /* White accent for interactive elements */
+            --text-color: #000000; /* Black text for high readability on white backgrounds */
+            --hover-bg: #ffffff; /* White hover effect for clear interactivity */
+            --blur-effect: none; /* No blur effect for a clean interface */
+            --light-square: #efece2; /* Refined light square for a sleek chessboard design */
+            --dark-square: #9fc678; /* Warm, modern dark square for strong contrast */
+        }
+        
+        /* Dark theme variables using only black, green, and gray */
+        :root.dark {
+            --primary-bg: #2e2e2e; /* Dark gray background for a sleek dark theme */
+            --secondary-bg: #3a3a3a; /* Slightly lighter gray for panels to enhance contrast */
+            --main-bg: #2e2e2e; /* Consistent dark content area */
+            --accent-color: #4caf50; /* Modern green accent for interactive elements */
+            --text-color: #8e8e8e; /* Light gray text for high readability on dark backgrounds */
+            --hover-bg: #ffffff; /* Bright hover effect for clear interactivity */
+            --blur-effect: none; /* No blur effect for a clean interface */
+            --light-square: #efece2; /* Refined light square for a sleek chessboard design */
+            --dark-square: #9fc678; /* Warm, modern dark square for strong contrast */
+        }
+        body {
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background: var(--primary-bg);
+            color: var(--text-color);
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        /* Layout for larger screens: board on left, large sidebar on right */
+        @media (min-width: 768px) {
+            .container {
+                flex-direction: row;
+            }
+            main.main-content {
+                flex: 1;
+                margin-right: 10px;
+            }
+            aside.right-sidebar {
+                width: 30%;
+                margin-top: 0;
+                position: static;
+            }
+        }
+        main.main-content {
+            flex-grow: 1;
+            background: var(--main-bg);
+            border: 1px solid #ccc;
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            border-radius: 8px;
+            margin: 10px;
+            box-sizing: border-box;
+            transition: background 0.3s ease, color 0.3s ease;
+        }
+        .board-container {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            box-sizing: border-box;
+            position: relative;
+        }
+        .chess-board {
+            flex-grow: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            box-sizing: border-box;
+        }
+        .board {
+            width: 90%;
+            max-width: 600px;
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            gap: 0px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.244);
+            box-sizing: border-box;
+        }
+        .square {
+            width: 100%;
+            padding-top: 100%;
+            position: relative;
+            box-sizing: border-box;
+        }
+        .dark {
+            background: var(--dark-square);
+        }
+        .light {
+            background: var(--light-square);
+        }
+        .piece {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2em;
+            cursor: pointer;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            box-sizing: border-box;
+        }
+        .piece:hover {
+            transform: translate(-50%, -50%) scale(1.1);
+            opacity: 0.85;
+        }
+        aside.right-sidebar {
+            background: var(--secondary-bg);
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 10px;
+            box-sizing: border-box;
+            transition: background 0.3s ease, color 0.3s ease;
+            overflow-y: auto;
+        }
+        aside.right-sidebar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        aside.right-sidebar ul li a {
+            color: var(--text-color);
+            text-decoration: none;
+            padding: 10px 0;
+            display: block;
+            transition: background 0.3s ease, color 0.3s ease;
+            border-radius: 4px;
+        }
+        aside.right-sidebar ul li a:hover {
+            background: var(--hover-bg);
+            color: var(--accent-color);
+        }
+        .highlight {
+            background: rgba(255,255,0,0.4);
+        }
+        .taken-moves {
+            margin-top: 20px;
+            color: var(--text-color);
+        }
+        .taken-moves img {
+            width: 30px;
+            height: 30px;
+            margin-right: 5px;
+            transition: transform 0.3s ease;
+        }
+        .taken-moves img:hover {
+            transform: scale(1.2);
+        }
+        button {
+            background: var(--accent-color);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.3s ease, transform 0.3s ease;
+        }
+        button:hover {
+            background: #005bb5;
+        }
+        .disabled {
+            pointer-events: none;
+            opacity: 0.5;
+        }
+        .timer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+        }
+        .timer div {
+            background: rgba(255,255,255,0.8);
+            padding: 10px;
+            border-radius: 4px;
+            color: var(--text-color);
+            transition: background 0.3s ease, color 0.3s ease;
+            border: 1px solid #ccc;
+        }
+        .white-timer, .black-timer {
+            position: absolute;
+            background: rgba(255,255,255,0.8);
+            padding: 10px;
+            border-radius: 4px;
+            color: var(--text-color);
+            transition: background 0.3s ease, color 0.3s ease;
+            border: 1px solid #ccc;
+        }
+        .white-timer {
+            top: 50%;
+            right: -160px;
+            transform: translateY(-50%);
+        }
+        .black-timer {
+            bottom: 50%;
+            right: -160px;
+            transform: translateY(50%);
+        }
+        .suggestion-stockfish {
+            outline: 3px solid blue !important;
+        }
+        .suggestion-model {
+            outline: 3px solid yellow !important;
+        }
+        .suggestion-stockfish-next {
+            outline: 3px solid skyblue !important;
+        }
+        .suggestion-model-next {
+            outline: 3px solid gold !important;
+        }
+        /* New styles for sidebar toggle buttons */
+        .toggle-sidebar-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: var(--accent-color);
+            color: #fff;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.3s ease, transform 0.3s ease;
+        }
+        .toggle-sidebar-btn:hover {
+            background: #005bb5;
+            transform: scale(1.05);
+        }
+        .show-sidebar-btn {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: var(--accent-color);
+            color: #fff;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.3s ease, transform 0.3s ease;
+            display: none;
+            z-index: 2000;
+        }
+        .show-sidebar-btn:hover {
+            background: #005bb5;
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <main class="main-content">
+            <!-- Board and Timers -->
+            <div class="board-container">
+                <!-- Timer Above Board -->
+                <div style="width: 90%; max-width: 600px; margin: 0 auto; text-align: center; padding: 10px; background: var(--secondary-bg); border-radius: 8px; box-sizing: border-box; height: 50px;">
+                    <div class="timer">
+                        <div id="blackTimer">Black: 00:00</div>
+                    </div>
+                </div>
+                <!-- Chess Board -->
+                <section class="chess-board">
+                    <div class="board disabled" id="chessBoard">
+                        <!-- Squares with pieces -->
+                        <div class="square dark" data-square="a8"><img src="https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg" class="piece" draggable="true" id="black-rook-1" alt="Black Rook"></div>
+                        <div class="square light" data-square="b8"><img src="https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg" class="piece" draggable="true" id="black-knight-1" alt="Black Knight"></div>
+                        <div class="square dark" data-square="c8"><img src="https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg" class="piece" draggable="true" id="black-bishop-1" alt="Black Bishop"></div>
+                        <div class="square light" data-square="d8"><img src="https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg" class="piece" draggable="true" id="black-queen" alt="Black Queen"></div>
+                        <div class="square dark" data-square="e8"><img src="https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg" class="piece" draggable="true" id="black-king" alt="Black King"></div>
+                        <div class="square light" data-square="f8"><img src="https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg" class="piece" draggable="true" id="black-bishop-2" alt="Black Bishop"></div>
+                        <div class="square dark" data-square="g8"><img src="https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg" class="piece" draggable="true" id="black-knight-2" alt="Black Knight"></div>
+                        <div class="square light" data-square="h8"><img src="https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg" class="piece" draggable="true" id="black-rook-2" alt="Black Rook"></div>
+                        <!-- Second row -->
+                        <div class="square light" data-square="a7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-1" alt="Black Pawn"></div>
+                        <div class="square dark" data-square="b7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-2" alt="Black Pawn"></div>
+                        <div class="square light" data-square="c7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-3" alt="Black Pawn"></div>
+                        <div class="square dark" data-square="d7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-4" alt="Black Pawn"></div>
+                        <div class="square light" data-square="e7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-5" alt="Black Pawn"></div>
+                        <div class="square dark" data-square="f7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-6" alt="Black Pawn"></div>
+                        <div class="square light" data-square="g7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-7" alt="Black Pawn"></div>
+                        <div class="square dark" data-square="h7"><img src="https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg" class="piece" draggable="true" id="black-pawn-8" alt="Black Pawn"></div>
+                        <!-- Empty squares rows -->
+                        <div class="square dark" data-square="a6"></div>
+                        <div class="square light" data-square="b6"></div>
+                        <div class="square dark" data-square="c6"></div>
+                        <div class="square light" data-square="d6"></div>
+                        <div class="square dark" data-square="e6"></div>
+                        <div class="square light" data-square="f6"></div>
+                        <div class="square dark" data-square="g6"></div>
+                        <div class="square light" data-square="h6"></div>
+                        <div class="square light" data-square="a5"></div>
+                        <div class="square dark" data-square="b5"></div>
+                        <div class="square light" data-square="c5"></div>
+                        <div class="square dark" data-square="d5"></div>
+                        <div class="square light" data-square="e5"></div>
+                        <div class="square dark" data-square="f5"></div>
+                        <div class="square light" data-square="g5"></div>
+                        <div class="square dark" data-square="h5"></div>
+                        <div class="square dark" data-square="a4"></div>
+                        <div class="square light" data-square="b4"></div>
+                        <div class="square dark" data-square="c4"></div>
+                        <div class="square light" data-square="d4"></div>
+                        <div class="square dark" data-square="e4"></div>
+                        <div class="square light" data-square="f4"></div>
+                        <div class="square dark" data-square="g4"></div>
+                        <div class="square light" data-square="h4"></div>
+                        <div class="square light" data-square="a3"></div>
+                        <div class="square dark" data-square="b3"></div>
+                        <div class="square light" data-square="c3"></div>
+                        <div class="square dark" data-square="d3"></div>
+                        <div class="square light" data-square="e3"></div>
+                        <div class="square dark" data-square="f3"></div>
+                        <div class="square light" data-square="g3"></div>
+                        <div class="square dark" data-square="h3"></div>
+                        <!-- Seventh row -->
+                        <div class="square dark" data-square="a2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-1" alt="White Pawn"></div>
+                        <div class="square light" data-square="b2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-2" alt="White Pawn"></div>
+                        <div class="square dark" data-square="c2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-3" alt="White Pawn"></div>
+                        <div class="square light" data-square="d2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-4" alt="White Pawn"></div>
+                        <div class="square dark" data-square="e2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-5" alt="White Pawn"></div>
+                        <div class="square light" data-square="f2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-6" alt="White Pawn"></div>
+                        <div class="square dark" data-square="g2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-7" alt="White Pawn"></div>
+                        <div class="square light" data-square="h2"><img src="https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg" class="piece" draggable="true" id="white-pawn-8" alt="White Pawn"></div>
+                        <!-- Eighth row -->
+                        <div class="square light" data-square="a1"><img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" class="piece" draggable="true" id="white-rook-1" alt="White Rook"></div>
+                        <div class="square dark" data-square="b1"><img src="https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg" class="piece" draggable="true" id="white-knight-1" alt="White Knight"></div>
+                        <div class="square light" data-square="c1"><img src="https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg" class="piece" draggable="true" id="white-bishop-1" alt="White Bishop"></div>
+                        <div class="square dark" data-square="d1"><img src="https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg" class="piece" draggable="true" id="white-queen" alt="White Queen"></div>
+                        <div class="square light" data-square="e1"><img src="https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg" class="piece" draggable="true" id="white-king" alt="White King"></div>
+                        <div class="square dark" data-square="f1"><img src="https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg" class="piece" draggable="true" id="white-bishop-2" alt="White Bishop"></div>
+                        <div class="square light" data-square="g1"><img src="https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg" class="piece" draggable="true" id="white-knight-2" alt="White Knight"></div>
+                        <div class="square dark" data-square="h1"><img src="https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg" class="piece" draggable="true" id="white-rook-2" alt="White Rook"></div>
+                    </div>
+                </section>
+                <!-- Timer Below Board -->
+                <div style="width: 90%; max-width: 600px; margin: 10px auto; text-align: center; padding: 10px; background: var(--secondary-bg); border-radius: 8px; box-sizing: border-box; height: 50px;">
+                    <div class="timer">
+                        <div id="whiteTimer">White: 00:00</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+        <aside class="right-sidebar">
+            <!-- New button to hide the sidebar -->
+            <button id="toggleSidebarButton" class="toggle-sidebar-btn">Hide Panel</button>
+            <!-- New button to toggle theme -->
+            <button id="toggleThemeButton" style="margin-top: 10px;">Toggle Theme</button>
+            <!-- Navigation Section (moved from left sidebar) -->
+            <div class="navigation-section" style="margin-bottom:20px;">
+                <h2 style="margin: 0; padding: 10px 0;">Chess AI</h2>
+                <p style="margin: 10px 0;">Username: {{ username }}</p>
+                <form id="combinedButtons">
+                    <div class="nav-buttons">
+                        <button type="button" onclick="window.location.href='https://chessaicp13.netlify.app/'">Play With AI</button>
+                        <button type="button" onclick="window.location.href='contact.html'">Contact</button>
+                        <button type="button" onclick="moveHistory = []; localStorage.setItem('logout', Date.now()); window.location.replace('login.html');">Logout</button>
+                    </div>
+                    <div class="controls-section">
+                        <button id="flipBoardButton" type="button" style="margin-top: 10px;">Flip Board</button>
+                        <button id="startGameButton" type="button" style="margin-top: 10px;">Start Game</button>
+                        <button id="resetGameButton" type="button" style="margin-top: 10px; display: none;">Reset Game</button>
+                        <!-- <button id="onlineButton" type="button" style="margin-top: 10px;">Online play</button> -->
+                        <button id="Analysis" type="button" onclick="window.location.href='https://openingchesscp13.netlify.app/'" style="margin-top: 10px;">Opening Analysis</button>
+                        <button id="deepAnalysis" type="button" onclick="window.location.href='{{ url_for('deepthome') }}'" style="margin-top: 10px;">Deep Analysis</button>
+                    </div>
+                </form>
+                <div class="taken-moves">
+                    <h4>Played Moves</h4>
+                    <ul id="takenMovesList" style="max-height: 100px; overflow-y: auto;"></ul>
+                </div>
+                <div class="moves-analysis" style="margin-top: 20px; display: flex; flex-direction: column; align-items: center;">
+                    <h4>Moves Analysis</h4>
+                    <div id="movesAnalysisResult" style="min-height: 50px; font-size: 0.9em;"></div>
+                </div>
+                <h4>Taken Moves</h4>
+                <label for="timerSelect" style="font-weight: 600; margin-bottom: 10px;">Select Timer:</label>
+                <select id="timerSelect" title="Select Timer" style="padding: 12px; border-radius: 8px; background: #ececec; color: var(--text-color); border: 1px solid #ccc; width: 100%; max-width: 300px;" onchange="toggleCustomTimer(this)">
+                    <option value="180">3 minutes</option>
+                    <option value="300">5 minutes</option>
+                    <option value="600">10 minutes</option>
+                    <option value="900">15 minutes</option>
+                    <option value="custom">Custom</option>
+                </select>
+                <div id="customTimerSection" style="margin-top: 20px; display: none; flex-direction: column; align-items: center;">
+                    <label for="customTimer" style="font-weight: 600; margin-bottom: 10px;">Custom Timer:</label>
+                    <input type="number" id="customTimerValue" placeholder="Enter value" style="padding: 12px; border-radius: 8px; background: #f9f9f9; color: var(--text-color); border: 1px solid #ccc; width: 100%; max-width: 300px; margin-bottom: 10px;">
+                    <select id="customTimerUnit" title="Custom Timer Unit" style="padding: 12px; border-radius: 8px; background: #f9f9f9; color: var(--text-color); border: 1px solid #ccc; width: 100%; max-width: 300px;">
+                        <option value="seconds">Seconds</option>
+                        <option value="minutes">Minutes</option>
+                    </select>
+                    <button id="setCustomTimerButton" style="margin-top: 10px;">Set Custom Timer</button>
+                </div>
+                <script>
+                    function toggleCustomTimer(selectElement) {
+                        const customTimerSection = document.getElementById('customTimerSection');
+                        const customTimerValue = document.getElementById('customTimerValue');
+                        const customTimerUnit = document.getElementById('customTimerUnit');
+                        if (selectElement.value === 'custom') {
+                            customTimerSection.style.display = 'flex';
+                        } else {
+                            customTimerSection.style.display = 'none';
+                            customTimerValue.value = '';
+                            customTimerUnit.selectedIndex = 0;
+                        }
+                    }
+
+                    document.getElementById('startGameButton').addEventListener('click', function() {
+                        document.getElementById('resetGameButton').style.display = 'block';
+                    });
+                </script>
+            </div>
+        </aside>
+    </div>
+    <!-- Added show sidebar button so the sidebar can be restored when hidden -->
+    <button id="showSidebarButton" class="show-sidebar-btn" style="display: none;">Show Panel</button>
+
+    <!-- Vertical progress bar for pieces advantage with remaining points displayed (black on top, white on bottom) -->
+    <div id="progressBarContainer" style="position: fixed; left: 50px; top: 50%; transform: translateY(-50%); width: 30px; height: 550px; background-color: #eee; border: 1px solid #ccc; border-radius: 5px; z-index: 1000;">
+        <div id="blackRemainingLabel" style="position: absolute; top: -25px; width: 100%; text-align: center; font-size: 10px; color: #333;">50</div>
+        <div id="piecesProgressBar" style="position: absolute; bottom: 0; width: 100%; height: 50%; background-color: #76c7c0;"></div>
+        <div id="whiteRemainingLabel" style="position: absolute; bottom: -25px; width: 100%; text-align: center; font-size: 10px; color: #333;">50</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <script>
+        // Global variables for game end popup and game tracking
+        const chess = new Chess();
+        let gameStartTime = null;
+        let currentUsername = '';
+        let currentGameCode = '';
+
+        function renderBoard() {
+            const boardSquares = document.querySelectorAll('.square');
+            boardSquares.forEach(square => {
+                const squareName = square.getAttribute('data-square');
+                // Clear any existing piece
+                square.innerHTML = "";
+                const piece = chess.get(squareName);
+                if (piece) {
+                    const pieceImg = document.createElement('img');
+                    pieceImg.classList.add('piece');
+                    pieceImg.setAttribute('draggable', 'true');
+                    // Determine the image source based on piece type and color
+                    if (piece.color === 'w') {
+                        if (piece.type === 'p') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg';
+                        else if (piece.type === 'r') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg';
+                        else if (piece.type === 'n') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg';
+                        else if (piece.type === 'b') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg';
+                        else if (piece.type === 'q') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg';
+                        else if (piece.type === 'k') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg';
+                    } else {
+                        if (piece.type === 'p') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg';
+                        else if (piece.type === 'r') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg';
+                        else if (piece.type === 'n') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg';
+                        else if (piece.type === 'b') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg';
+                        else if (piece.type === 'q') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg';
+                        else if (piece.type === 'k') pieceImg.src = 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg';
+                    }
+                    // Reattach drag and click event listeners
+                    pieceImg.addEventListener('dragstart', dragStart);
+                    pieceImg.addEventListener('click', selectPiece);
+                    square.appendChild(pieceImg);
+                }
+            });
+        }
+        const pieces = document.querySelectorAll('.piece');
+        let selectedPiece = null;
+        let timer;
+        let whiteTimerValue = 0;
+        let blackTimerValue = 0;
+        let currentPlayer = 'w';
+    
+        pieces.forEach(piece => {
+            piece.addEventListener('dragstart', dragStart);
+            piece.addEventListener('click', selectPiece);
+        });
+    
+        const squares = document.querySelectorAll('.square');
+        squares.forEach(square => {
+            square.addEventListener('dragover', dragOver);
+            square.addEventListener('drop', drop);
+            square.addEventListener('click', clickToMove);
+        });
+    
+        function dragStart(e) {
+            e.dataTransfer.setData('text/plain', e.target.id);
+            setTimeout(() => {
+                e.target.classList.add('hide');
+            }, 0);
+            showPossibleMoves(e.target);
+        }
+    
+        function dragOver(e) {
+            e.preventDefault();
+        }
+    
+        function drop(e) {
+            e.preventDefault();
+            const id = e.dataTransfer.getData('text');
+            const piece = document.getElementById(id);
+            const targetSquare = e.target.closest('.square');
+            const from = piece.parentElement.getAttribute('data-square');
+            const to = targetSquare.getAttribute('data-square');
+    
+            // Check for pawn promotion
+            const isPawnPromotion = (piece.id.includes('pawn') && 
+                ((piece.id.includes('white') && to[1] === '8') || 
+                 (piece.id.includes('black') && to[1] === '1')));
+    
+            if (isPawnPromotion) {
+                const promotionChoice = prompt('Promote to (q=queen, r=rook, b=bishop, n=knight):', 'q');
+                if (!promotionChoice) {
+                    piece.classList.remove('hide');
+                    return;
+                }
+                const move = chess.move({ 
+                    from, 
+                    to, 
+                    promotion: promotionChoice.toLowerCase() 
+                });
+                
+                if (move) {
+                    if (move.captured) {
+                        addTakenMove(move);
+                        targetSquare.innerHTML = '';
+                    }
+                    shareMove(move);
+                    promotePawn(piece, move.color, to, promotionChoice.toLowerCase());
+                    updateBoard();
+                    checkGameStatus();
+                    switchPlayer();
+                } else {
+                    piece.classList.remove('hide');
+                    let errorMsg = `Invalid move from ${from} to ${to}`;
+                    showMessage(errorMsg);
+                    addMoveAnalysis(errorMsg, false);
+                }
+            } else {
+                const move = chess.move({ from, to });
+                if (move) {
+                    if (move.captured) {
+                        addTakenMove(move);
+                        targetSquare.innerHTML = '';
+                    }
+                    shareMove(move);
+                    targetSquare.appendChild(piece);
+                    piece.classList.remove('hide');
+                    updateBoard();
+                    checkGameStatus();
+                    switchPlayer();
+                } else {
+                    piece.classList.remove('hide');
+                    let errorMsg = `Invalid move from ${from} to ${to}`;
+                    showMessage(errorMsg);
+                    addMoveAnalysis(errorMsg, false);
+                }
+            }
+        }
+    
+        function selectPiece(e) {
+            const piece = e.target;
+            showPossibleMoves(piece);
+            selectedPiece = piece;
+        }
+    
+        function showPossibleMoves(piece) {
+            const square = piece.parentElement.getAttribute('data-square');
+            const moves = chess.moves({ square, verbose: true });
+    
+            clearHighlights();
+            moves.forEach(move => {
+                const targetSquare = document.querySelector(`[data-square="${move.to}"]`);
+                targetSquare.classList.add('highlight');
+            });
+        }
+    
+        function clearHighlights() {
+            document.querySelectorAll('.highlight').forEach(square => {
+                square.classList.remove('highlight');
+            });
+        }
+    
+        function updateBoard() {
+            clearHighlights();
+            selectedPiece = null;
+        }
+    
+        function addTakenMove(move) {
+            const takenMovesList = document.getElementById('takenMovesList');
+            const moveItem = document.createElement('li');
+            const pieceImage = document.createElement('img');
+            pieceImage.src = `https://upload.wikimedia.org/wikipedia/commons/${move.color === 'w' ? '4/45' : 'c/c7'}/Chess_${move.captured}${move.color === 'w' ? 'lt45' : 'dt45'}.svg`;
+            moveItem.appendChild(pieceImage);
+            takenMovesList.appendChild(moveItem);
+        }
+    
+        function checkGameStatus() {
+            if (chess.in_checkmate()) {
+                showGameEndModal('Checkmate!');
+            } else if (chess.in_draw()) {
+                showGameEndModal('Draw!');
+            } else if (chess.in_stalemate()) {
+                showGameEndModal('Stalemate!');
+            } else if (chess.in_threefold_repetition()) {
+                showGameEndModal('Threefold repetition!');
+            } else if (chess.insufficient_material()) {
+                showGameEndModal('Insufficient material!');
+            } else if (chess.in_check()) {
+                alert('Check!');
+            }
+        }
+    
+        function promotePawn(piece, color, to, promotionPiece) {
+            const pieceImage = document.createElement('img');
+            let pieceCode;
+            switch(promotionPiece) {
+                case 'q':
+                    pieceCode = color === 'w' ? '1/15' : '4/47';
+                    break;
+                case 'r':
+                    pieceCode = color === 'w' ? '7/72' : 'f/ff';
+                    break;
+                case 'b':
+                    pieceCode = color === 'w' ? 'b/b1' : '9/98';
+                    break;
+                case 'n':
+                    pieceCode = color === 'w' ? '7/70' : 'e/ef';
+                    break;
+                default:
+                    pieceCode = color === 'w' ? '1/15' : '4/47';
+            }
+            pieceImage.src = `https://upload.wikimedia.org/wikipedia/commons/${pieceCode}/Chess_${promotionPiece}${color === 'w' ? 'lt45' : 'dt45'}.svg`;
+            pieceImage.classList.add('piece');
+            pieceImage.setAttribute('draggable', 'true');
+            pieceImage.setAttribute('id', `${color}-${promotionPiece}-${Date.now()}`);
+            pieceImage.addEventListener('dragstart', dragStart);
+            pieceImage.addEventListener('click', selectPiece);
+            const targetSquare = document.querySelector(`[data-square="${to}"]`);
+            targetSquare.innerHTML = '';
+            targetSquare.appendChild(pieceImage);
+            piece.remove();
+        }
+    
+        function clickToMove(e) {
+            const targetSquare = e.target.closest('.square');
+            if (selectedPiece && targetSquare) {
+                const from = selectedPiece.parentElement.getAttribute('data-square');
+                const to = targetSquare.getAttribute('data-square');
+    
+                // Check for pawn promotion
+                const isPawnPromotion = (selectedPiece.id.includes('pawn') && 
+                    ((selectedPiece.id.includes('white') && to[1] === '8') || 
+                     (selectedPiece.id.includes('black') && to[1] === '1')));
+    
+                if (isPawnPromotion) {
+                    const promotionChoice = prompt('Promote to (q=queen, r=rook, b=bishop, n=knight):', 'q');
+                    if (!promotionChoice) {
+                        return;
+                    }
+                    const move = chess.move({ 
+                        from, 
+                        to, 
+                        promotion: promotionChoice.toLowerCase() 
+                    });
+                    
+                    if (move) {
+                        if (move.captured) {
+                            addTakenMove(move);
+                            targetSquare.innerHTML = '';
+                        }
+                        shareMove(move);
+                        promotePawn(selectedPiece, move.color, to, promotionChoice.toLowerCase());
+                        updateBoard();
+                        checkGameStatus();
+                        switchPlayer();
+                    } else {
+                        let errorMsg = `Invalid move from ${from} to ${to}`;
+                        showMessage(errorMsg);
+                        addMoveAnalysis(errorMsg, false);
+                    }
+                } else {
+                    const move = chess.move({ from, to });
+                    if (move) {
+                        if (move.captured) {
+                            addTakenMove(move);
+                            targetSquare.innerHTML = '';
+                        }
+                        shareMove(move);
+                        targetSquare.appendChild(selectedPiece);
+                        updateBoard();
+                        checkGameStatus();
+                        switchPlayer();
+                    } else {
+                        let errorMsg = `Invalid move from ${from} to ${to}`;
+                        showMessage(errorMsg);
+                        addMoveAnalysis(errorMsg, false);
+                    }
+                }
+            }
+        }
+    
+        // Flip board functionality
+        document.getElementById('flipBoardButton').addEventListener('click', () => {
+            const board = document.getElementById('chessBoard');
+            const squares = Array.from(board.children);
+            squares.reverse().forEach(square => board.appendChild(square));
+        });
+    
+        // Start game functionality
+        document.getElementById('startGameButton').addEventListener('click', () => {
+            const chessBoard = document.getElementById('chessBoard');
+            chessBoard.classList.remove('disabled');
+            document.getElementById('startGameButton').style.display = 'none';
+            document.getElementById('resetGameButton').style.display = 'block';
+            startTimer();
+        });
+    
+        // Reset game functionality
+        document.getElementById('resetGameButton').addEventListener('click', () => {
+            chess.reset();
+            updateBoard();
+            document.getElementById('takenMovesList').innerHTML = '';
+            clearInterval(timer);
+            whiteTimerValue = 0;
+            blackTimerValue = 0;
+            updateTimers();
+            document.getElementById('startGameButton').style.display = 'block';
+            document.getElementById('resetGameButton').style.display = 'none';
+            document.getElementById('chessBoard').classList.add('disabled');
+            resetPiecesToDefaultPositions();
+            // Clear the global move history for a fresh game
+            moveHistory = [];
+        });
+    
+        function resetPiecesToDefaultPositions() {
+            const defaultPositions = {
+                'a8': 'black-rook-1', 'b8': 'black-knight-1', 'c8': 'black-bishop-1', 'd8': 'black-queen', 'e8': 'black-king', 'f8': 'black-bishop-2', 'g8': 'black-knight-2', 'h8': 'black-rook-2',
+                'a7': 'black-pawn-1', 'b7': 'black-pawn-2', 'c7': 'black-pawn-3', 'd7': 'black-pawn-4', 'e7': 'black-pawn-5', 'f7': 'black-pawn-6', 'g7': 'black-pawn-7', 'h7': 'black-pawn-8',
+                'a2': 'white-pawn-1', 'b2': 'white-pawn-2', 'c2': 'white-pawn-3', 'd2': 'white-pawn-4', 'e2': 'white-pawn-5', 'f2': 'white-pawn-6', 'g2': 'white-pawn-7', 'h2': 'white-pawn-8',
+                'a1': 'white-rook-1', 'b1': 'white-knight-1', 'c1': 'white-bishop-1', 'd1': 'white-queen', 'e1': 'white-king', 'f1': 'white-bishop-2', 'g1': 'white-knight-2', 'h1': 'white-rook-2'
+            };
+    
+            const pieceImages = {
+                'black-rook-1': 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
+                'black-knight-1': 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
+                'black-bishop-1': 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
+                'black-queen': 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
+                'black-king': 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg',
+                'black-bishop-2': 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
+                'black-knight-2': 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
+                'black-rook-2': 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
+                'black-pawn-1': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'black-pawn-2': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'black-pawn-3': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'black-pawn-4': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'black-pawn-5': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'black-pawn-6': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'black-pawn-7': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'black-pawn-8': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+                'white-pawn-1': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-pawn-2': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-pawn-3': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-pawn-4': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-pawn-5': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-pawn-6': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-pawn-7': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-pawn-8': 'https://upload.wikimedia.org/wikipedia/commons/4/45/Chess_plt45.svg',
+                'white-rook-1': 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
+                'white-knight-1': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
+                'white-bishop-1': 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
+                'white-queen': 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
+                'white-king': 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg',
+                'white-bishop-2': 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
+                'white-knight-2': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
+                'white-rook-2': 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg'
+            };
+    
+            squares.forEach(square => {
+                const squareId = square.getAttribute('data-square');
+                square.innerHTML = '';
+                if (defaultPositions[squareId]) {
+                    const pieceId = defaultPositions[squareId];
+                    const pieceImage = document.createElement('img');
+                    pieceImage.src = pieceImages[pieceId];
+                    pieceImage.classList.add('piece');
+                    pieceImage.setAttribute('draggable', 'true');
+                    pieceImage.setAttribute('id', pieceId);
+                    pieceImage.addEventListener('dragstart', dragStart);
+                    pieceImage.addEventListener('click', selectPiece);
+                    square.appendChild(pieceImage);
+                }
+            });
+        }
+    
+        function startTimer() {
+            const timerSelect = document.getElementById('timerSelect');
+            const customTimerValue = document.getElementById('customTimerValue').value;
+            const customTimerUnit = document.getElementById('customTimerUnit').value;
+            let initialTime = parseInt(timerSelect.value);
+    
+            if (customTimerValue) {
+                if (customTimerUnit === 'minutes') {
+                    initialTime = parseInt(customTimerValue) * 60;
+                } else {
+                    initialTime = parseInt(customTimerValue);
+                }
+            }
+            // Mark the game start time
+            gameStartTime = new Date();
+    
+            whiteTimerValue = initialTime;
+            blackTimerValue = initialTime;
+            updateTimers();
+            timer = setInterval(() => {
+                if (currentPlayer === 'w') {
+                    if (whiteTimerValue > 0) {
+                        whiteTimerValue--;
+                    } else {
+                        clearInterval(timer);
+                        showGameEndModal('Time is up! Black wins.');
+                    }
+                } else {
+                    if (blackTimerValue > 0) {
+                        blackTimerValue--;
+                    } else {
+                        clearInterval(timer);
+                        showGameEndModal('Time is up! White wins.');
+                    }
+                }
+                updateTimers();
+            }, 1000);
+        }
+    
+        function updateTimers() {
+            document.getElementById('whiteTimer').textContent = `White: ${formatTime(whiteTimerValue)}`;
+            document.getElementById('blackTimer').textContent = `Black: ${formatTime(blackTimerValue)}`;
+        }
+    
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+    
+        function switchPlayer() {
+            currentPlayer = currentPlayer === 'w' ? 'b' : 'w';
+            document.getElementById('currentPlayer').textContent = currentPlayer === 'w' ? 'White' : 'Black';
+            document.getElementById('movesMade').textContent = chess.history().length;
+        }
+    
+        // New functions for highlighting suggested moves with auto-removal after 5 seconds
+        function clearSuggestedHighlights() {
+            document.querySelectorAll('.suggestion-stockfish, .suggestion-stockfish-next, .suggestion-model, .suggestion-model-next')
+                .forEach(sq => {
+                    sq.classList.remove('suggestion-stockfish', 'suggestion-stockfish-next', 'suggestion-model', 'suggestion-model-next');
+                });
+        }
+    
+        function highlightStockfishSuggestion(uciMove) {
+            if (uciMove && uciMove.length >= 4) {
+                const from = uciMove.substring(0,2);
+                const to = uciMove.substring(2,4);
+                const fromSquare = document.querySelector(`[data-square="${from}"]`);
+                const toSquare = document.querySelector(`[data-square="${to}"]`);
+                if (fromSquare) {
+                    fromSquare.classList.add('suggestion-stockfish');
+                    setTimeout(() => {
+                        fromSquare.classList.remove('suggestion-stockfish');
+                    }, 5000);
+                }
+                if (toSquare) {
+                    toSquare.classList.add('suggestion-stockfish');
+                    setTimeout(() => {
+                        toSquare.classList.remove('suggestion-stockfish');
+                    }, 5000);
+                }
+            }
+        }
+    
+        function highlightModelSuggestion(uciMove) {
+            if (uciMove && uciMove.length >= 4) {
+                const from = uciMove.substring(0,2);
+                const to = uciMove.substring(2,4);
+                const fromSquare = document.querySelector(`[data-square="${from}"]`);
+                const toSquare = document.querySelector(`[data-square="${to}"]`);
+                if (fromSquare) {
+                    fromSquare.classList.add('suggestion-model');
+                    setTimeout(() => {
+                        fromSquare.classList.remove('suggestion-model');
+                    }, 5000);
+                }
+                if (toSquare) {
+                    toSquare.classList.add('suggestion-model');
+                    setTimeout(() => {
+                        toSquare.classList.remove('suggestion-model');
+                    }, 5000);
+                }
+            }
+        }
+    
+        function highlightStockfishNextSuggestion(uciMove) {
+            if (uciMove && uciMove.length >= 4) {
+                const from = uciMove.substring(0, 2);
+                const to = uciMove.substring(2, 4);
+                const fromSquare = document.querySelector(`[data-square="${from}"]`);
+                const toSquare = document.querySelector(`[data-square="${to}"]`);
+                if (fromSquare) {
+                    fromSquare.classList.add('suggestion-stockfish-next');
+                    setTimeout(() => {
+                        fromSquare.classList.remove('suggestion-stockfish-next');
+                    }, 5000);
+                }
+                if (toSquare) {
+                    toSquare.classList.add('suggestion-stockfish-next');
+                    setTimeout(() => {
+                        toSquare.classList.remove('suggestion-stockfish-next');
+                    }, 5000);
+                }
+            }
+        }
+    
+        function highlightModelNextSuggestion(uciMove) {
+            if (uciMove && uciMove.length >= 4) {
+                const from = uciMove.substring(0, 2);
+                const to = uciMove.substring(2, 4);
+                const fromSquare = document.querySelector(`[data-square="${from}"]`);
+                const toSquare = document.querySelector(`[data-square="${to}"]`);
+                if (fromSquare) {
+                    fromSquare.classList.add('suggestion-model-next');
+                    setTimeout(() => {
+                        fromSquare.classList.remove('suggestion-model-next');
+                    }, 5000);
+                }
+                if (toSquare) {
+                    toSquare.classList.add('suggestion-model-next');
+                    setTimeout(() => {
+                        toSquare.classList.remove('suggestion-model-next');
+                    }, 5000);
+                }
+            }
+        }
+    
+        // New function to share moves with the backend (app.py)
+        function shareMove(move) {
+            let moveUci = move.uci;
+            if (!moveUci) {
+                moveUci = move.from + move.to;
+                if (move.promotion) {
+                    moveUci += move.promotion.toLowerCase();
+                }
+            }
+            moveHistory.push(moveUci);
+            const payload = {
+                ...move,
+                uci: moveUci,
+                moves: moveHistory
+            };
+
+            fetch('/share_move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Use engine_suggestion as fallback for next move suggestion if not provided
+                const stockfishNext = data.analysis.stockfish_next_move || data.analysis.engine_suggestion;
+                const analysisMessage = `Played Move        : ${moveUci} <br>
+                        <div>--------------------------------</div>
+                        <div>Stockfish</div>
+                        <div>--------------------------------</div>
+                        Engine Suggestion: ${data.analysis.engine_suggestion} <br>
+                        Eval.             : ${data.analysis.stockfish_evaluation} <br>
+                        Rating.           : ${data.analysis.move_rating} <br>
+                        Review.           : ${data.analysis.analysis_message} <br>
+                        Next Move.        : ${stockfishNext} <br>
+                        <div>--------------------------------</div>
+                        <div>Model</div>
+                        <div>--------------------------------</div>
+                        Current Move.    : ${data.analysis.model_current_move} <br>
+                        Next Move.       : ${data.analysis.model_next_move}`;
+
+                document.getElementById('movesAnalysisResult').innerHTML = analysisMessage;
+
+                clearSuggestedHighlights();
+                if (data.analysis.engine_suggestion) {
+                    highlightStockfishSuggestion(data.analysis.engine_suggestion);
+                }
+                if (stockfishNext) {
+                    highlightStockfishNextSuggestion(stockfishNext);
+                }
+                if (data.analysis.model_current_move) {
+                    highlightModelSuggestion(data.analysis.model_current_move);
+                }
+                if (data.analysis.model_next_move) {
+                    highlightModelNextSuggestion(data.analysis.model_next_move);
+                }
+            })
+            .catch(error => {
+                console.error('Error sharing move:', error);
+            });
+        }
+        // Updated shareMove function to display Stockfish analysis and highlight its best move.
+        function shareMove(move) {
+            let moveUci = move.uci;
+            if (!moveUci) {
+                moveUci = move.from + move.to;
+                if (move.promotion) {
+                    moveUci += move.promotion.toLowerCase();
+                }
+            }
+            moveHistory.push(moveUci);
+            const payload = {
+                ...move,
+                uci: moveUci,
+                moves: moveHistory
+            };
+
+            fetch('/share_move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Use analysis data returned by the server (updated as per app.py configuration)
+                const stockfishBest = data.analysis.stockfish_best_move || "N/A";
+                const stockfishEval = data.analysis.stockfish_evaluation || "N/A";
+                const moveReview = data.analysis.move_review || "";
+                const modelCurrent = data.analysis.model_current_move || "N/A";
+                const modelNext = data.analysis.model_next_move || "N/A";
+
+                const analysisMessage = `
+                    <table style="width:100%; border-collapse: collapse;" border="1">
+                        <tr>
+                            <th colspan="2">Move Details</th>
+                        </tr>
+                        <tr>
+                            <td style="padding:5px;">Played Move</td>
+                            <td style="padding:5px;">${moveUci}</td>
+                        </tr>
+                        <tr>
+                            <th colspan="2">Stockfish Analysis</th>
+                        </tr>
+                        <tr>
+                            <td style="padding:5px;">Best Move</td>
+                            <td style="padding:5px;">${stockfishBest}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:5px;">Evaluation</td>
+                            <td style="padding:5px;">${stockfishEval}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:5px;">Review</td>
+                            <td style="padding:5px;">${moveReview}</td>
+                        </tr>
+                        <tr>
+                            <th colspan="2">Model Analysis</th>
+                        </tr>
+                        <tr>
+                            <td style="padding:5px;">Current Move</td>
+                            <td style="padding:5px;">${modelCurrent}</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:5px;">Next Move</td>
+                            <td style="padding:5px;">${modelNext}</td>
+                        </tr>
+                    </table>
+                `;
+
+                document.getElementById('movesAnalysisResult').innerHTML = analysisMessage;
+
+                clearSuggestedHighlights();
+                if (stockfishBest && stockfishBest !== "N/A") {
+                    highlightStockfishSuggestion(stockfishBest);
+                }
+                if (modelCurrent && modelCurrent !== "N/A") {
+                    highlightModelSuggestion(modelCurrent);
+                }
+                if (modelNext && modelNext !== "N/A") {
+                    highlightModelNextSuggestion(modelNext);
+                }
+            })
+            .catch(error => {
+                console.error('Error sharing move:', error);
+            });
+        }
+        // Function to display a temporary message for each move's storage status
+        function showMessage(msg) {
+            let messageDiv = document.getElementById('moveStatus');
+            if (!messageDiv) {
+                messageDiv = document.createElement('div');
+                messageDiv.id = 'moveStatus';
+                messageDiv.style.position = 'fixed';
+                messageDiv.style.bottom = '20px';
+                messageDiv.style.left = '50%';
+                messageDiv.style.transform = 'translateX(-50%)';
+                messageDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+                messageDiv.style.color = '#ecf0f1';
+                messageDiv.style.padding = '10px 20px';
+                messageDiv.style.borderRadius = '5px';
+                messageDiv.style.zIndex = '1000';
+                document.body.appendChild(messageDiv);
+            }
+            messageDiv.textContent = msg;
+            messageDiv.style.opacity = 1;
+            setTimeout(() => {
+                messageDiv.style.opacity = 0;
+                setTimeout(() => {
+                    if (messageDiv.parentNode) {
+                        messageDiv.parentNode.removeChild(messageDiv);
+                    }
+                }, 500);
+            }, 2000);
+        }
+    
+        function addMoveAnalysis(message, success) {
+            const analysisElement = document.getElementById('movesAnalysisResult');
+            const newRow = document.createElement('div');
+            newRow.textContent = message;
+            newRow.style.color = success ? 'lightgreen' : 'red';
+            newRow.style.marginBottom = '5px';
+            analysisElement.appendChild(newRow);
+        }
+    
+        document.getElementById('setCustomTimerButton').addEventListener('click', () => {
+            const customTimerValue = document.getElementById('customTimerValue').value;
+            const customTimerUnit = document.getElementById('customTimerUnit').value;
+            let initialTime;
+    
+            if (customTimerUnit === 'minutes') {
+                initialTime = parseInt(customTimerValue) * 60;
+            } else {
+                initialTime = parseInt(customTimerValue);
+            }
+    
+            whiteTimerValue = initialTime;
+            blackTimerValue = initialTime;
+            updateTimers();
+        });
+    
+        // share code to backend to tell new game started
+        function generateRandomCode(length) {
+            const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let code = '';
+            for (let i = 0; i < length; i++) {
+                code += charset.charAt(Math.floor(Math.random() * charset.length));
+            }
+            return code;
+        }
+     
+        function shareRandomCode() {
+            const randomCode = generateRandomCode(10);
+            fetch('/share_move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    san: randomCode,
+                    new_game: true
+                })
+            })
+            .then(response => response.json().then(data => ({ status: response.status, data })))
+            .then(result => {
+                if (result.status === 200) {
+                    currentGameCode = result.data.notation;
+                    addMoveAnalysis('Code shared: ' + result.data.notation, true);
+                } else {
+                    addMoveAnalysis('Error sharing code: ' + (result.data.error || 'Unknown error'), false);
+                }
+            })
+            .catch(error => {
+                addMoveAnalysis('Start game to share code', false);
+            });
+        }
+    
+        // Automatically execute the sharing process on page load
+        shareRandomCode();
+    </script>
+    <!-- Old Online Play Section removed -->
+    <!-- New container for displaying online messages -->
+    <div id="onlineMessages" style="position: fixed; bottom: 0; right: 0; background: rgba(0,0,0,0.7); color: #fff; padding: 10px; max-height: 200px; overflow-y: auto;"></div>
+    <!-- New container for entering target IP for online play -->
+    <div id="onlineInputContainer" style="display:none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--secondary-bg); padding: 20px; border-radius: 8px; z-index: 1000;">
+      <input type="text" id="targetIPInput" placeholder="Enter target IP" style="padding: 10px; border-radius: 4px; border: 1px solid #ccc;">
+      <button id="connectButton" style="padding: 10px 20px; margin-left: 10px; border-radius: 4px;">Connect</button>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function(){
+          // Initialize Socket.IO connection safely.
+          try {
+              var socket = io();
+              socket.on('move_made', function(data) {
+                  console.log("Received move:", data.uci);
+                  showOnlineMessage("Move received: " + data.notation);
+                  applyOnlineMove(data.uci);
+              });
+              socket.on('online_message', function(data) {
+                  showOnlineMessage(data.message);
+              });
+          } catch (e) {
+              console.error("Socket.IO initialization failed:", e);
+          }
+
+          const params = new URLSearchParams(window.location.search);
+          const username = params.get("username");
+          if (username) {
+              document.getElementById("userHeader").textContent = "Logged in as: " + username;
+              currentUsername = username;
+          }
+          function showOnlineMessage(message) {
+              const onlineMessages = document.getElementById('onlineMessages');
+              const msgElement = document.createElement('p');
+              msgElement.textContent = message;
+              onlineMessages.appendChild(msgElement);
+              onlineMessages.scrollTop = onlineMessages.scrollHeight;
+          }
+
+          function applyOnlineMove(moveUci) {
+              const regex = /^[a-h][1-8][a-h][1-8][qrbn]?$/;
+              if (!regex.test(moveUci)) {
+                  showOnlineMessage("Invalid move format: " + moveUci);
+                  return;
+              }
+              const from = moveUci.substring(0,2);
+              const to = moveUci.substring(2,4);
+              const promotion = moveUci.length === 5 ? moveUci[4] : undefined;
+              const moveObj = chess.move({ from: from, to: to, promotion: promotion });
+              if (moveObj) {
+                  renderBoard();
+                  switchPlayer();
+              } else {
+                  showOnlineMessage("Illegal move attempted: " + moveUci);
+              }
+          }
+
+          // When the Online button is clicked, show the target IP input container.
+          var onlineButton = document.getElementById('onlineButton');
+          if (onlineButton) {
+              onlineButton.addEventListener('click', function() {
+                  document.getElementById('onlineInputContainer').style.display = 'block';
+              });
+          }
+
+          // When the Connect button is clicked, process the target IP.
+          document.getElementById('connectButton').addEventListener('click', function() {
+              var targetIP = document.getElementById('targetIPInput').value.trim();
+              if (!targetIP) {
+                  alert("Target IP is required!");
+                  return;
+              }
+              document.getElementById('onlineInputContainer').style.display = 'none';
+              document.getElementById('targetIPInput').value = '';
+
+              fetch('/online_play', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ target_ip: targetIP })
+              })
+              .then(response => response.json())
+              .then(data => {
+                  if(data.message) {
+                      alert("Online play initiated: " + data.message);
+                  } else {
+                      alert("Error: " + (data.error || "Unknown error"));
+                  }
+              })
+              .catch(error => {
+                  alert("Error initiating online play: " + error.message);
+              });
+          });
+
+          // Added functionality for toggling theme and sidebar visibility
+          document.getElementById('toggleThemeButton').addEventListener('click', function () {
+              document.documentElement.classList.toggle('dark');
+          });
+          document.getElementById('toggleSidebarButton').addEventListener('click', function () {
+              document.querySelector('aside.right-sidebar').style.display = 'none';
+              document.getElementById('showSidebarButton').style.display = 'block';
+          });
+          document.getElementById('showSidebarButton').addEventListener('click', function () {
+              document.querySelector('aside.right-sidebar').style.display = 'block';
+              this.style.display = 'none';
+          });
+      });
+    </script>
+
+    <!-- Game End Modal Popup -->
+    <div id="gameEndModal" style="display:none; position: fixed; top: 0; left: 0; width:100%; height:100%; background: rgba(0,0,0,0.5); z-index:3000; align-items: center; justify-content: center;">
+         <div style="background: var(--primary-bg); padding: 20px; border-radius: 8px; width: 300px; text-align: center;">
+             <h2>Game Over</h2>
+             <p>Username: <span id="modalUsername"></span></p>
+             <p>Game Code: <span id="modalGameCode"></span></p>
+             <p>Time Taken: <span id="modalGameTime"></span></p>
+             <p>Result: <span id="modalGameResult"></span></p>
+             <button id="modalDeepAnalysisButton" onclick="window.location.href='{{ url_for('deepthome') }}'">Deep Analysis</button>
+             <br><br>
+             <button onclick="document.getElementById('gameEndModal').style.display='none';">Close</button>
+         </div>
+    </div>
+</body>
+</html>
+
+
+
+
+
+
+
+CLIENT.PY (NOT IMPLEMENTED)
+
+# client.py
+
+import socket
+import threading
+import time
+import sys
+import json
+
+# Global connection placeholder and a lock to synchronize access
+connection = None
+conn_lock = threading.Lock()
+PORT = 5000
+
+def get_local_ip():
+    """Auto-detect local IP address by connecting to an external address."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # This doesn't actually send data
+        s.connect(('8.8.8.8', 80))
+        ip = s.getsockname()[0]
+    except Exception:
+        ip = '127.0.0.1'
+    finally:
+        s.close()
+    return ip
+
+def server_thread(local_ip):
+    """Listen for an incoming connection."""
+    global connection
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.bind((local_ip, PORT))
+    server_sock.listen(1)
+    print(f"[SERVER] Listening on {local_ip}:{PORT}...")
+    conn, addr = server_sock.accept()
+    print(f"[SERVER] Accepted connection from {addr}")
+    with conn_lock:
+        if connection is None:
+            connection = conn
+        else:
+            # If already connected from client side, close this duplicate.
+            conn.close()
+    server_sock.close()
+
+def client_thread(target_ip):
+    """Attempt to connect to the target IP."""
+    global connection
+    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    while True:
+        try:
+            client_sock.connect((target_ip, PORT))
+            print(f"[CLIENT] Connected to {target_ip}:{PORT}")
+            with conn_lock:
+                if connection is None:
+                    connection = client_sock
+                else:
+                    client_sock.close()
+            break
+        except Exception as e:
+            print("[CLIENT] Connection attempt failed, retrying in 1 second...")
+            time.sleep(1)
+
+def send_messages(sock):
+    """Continuously read user input and send messages (e.g. move notations)."""
+    while True:
+        try:
+            msg = input("")
+            sock.sendall(msg.encode())
+        except Exception as e:
+            print("[SEND] Error sending message:", e)
+            break
+
+def receive_messages(sock):
+    """Continuously receive messages and emit them for UI display and processing."""
+    import app  # Import socketio from app
+    while True:
+        try:
+            data = sock.recv(1024)
+            if not data:
+                print("[RECV] Connection closed by peer.")
+                break
+            message = data.decode()
+            print(f"\n[RECV] {message}")
+            try:
+                move_data = json.loads(message)
+                app.socketio.emit('move_made', move_data)  # Emit move to frontend via socket.io
+            except json.JSONDecodeError:
+                app.socketio.emit('online_message', {"message": message})
+        except Exception as e:
+            print("[RECV] Error receiving message:", e)
+            break
+
+def send_move_update(move_data):
+    """Send move update to the connected client."""
+    global connection
+    try:
+        if connection:
+            connection.sendall(json.dumps(move_data).encode())
+        else:
+            print("No connection available for move update")
+    except Exception as e:
+        print("Error sending move update:", e)
+
+if __name__ == '__main__':
+    local_ip = get_local_ip()
+    print("Your IP address is:", local_ip)
+    
+    # Use command-line arguments if provided (username and target IP)
+    if len(sys.argv) >= 3:
+        username = sys.argv[1]
+        target_ip = sys.argv[2]
+        print(f"Username: {username}")
+        print(f"Target IP from arguments: {target_ip}")
+    else:
+        target_ip = input("Enter target device IP: ").strip()
+
+    # Start both server and client threads concurrently.
+    t_server = threading.Thread(target=server_thread, args=(local_ip,), daemon=True)
+    t_server.start()
+
+    t_client = threading.Thread(target=client_thread, args=(target_ip,), daemon=True)
+    t_client.start()
+
+    # Wait until a connection is established (either incoming or outgoing)
+    while connection is None:
+        time.sleep(0.5)
+    print("Connection established. You can start chatting (or sending move notations) now!")
+
+    t_send = threading.Thread(target=send_messages, args=(connection,), daemon=True)
+    t_recv = threading.Thread(target=receive_messages, args=(connection,), daemon=True)
+    t_send.start()
+    t_recv.start()
+
+    t_send.join()
+    t_recv.join()
